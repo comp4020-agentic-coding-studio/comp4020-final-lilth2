@@ -69,3 +69,13 @@ I also watched `node:sqlite`'s floating-point addition drift
 (`1.15 + 0.15` lands on `1.2999999999999998`) show up straight in the
 `/api/state` response, and rounded on read rather than leaving it to a test
 that would never have exercised it enough times to notice.
+
+## Commits for this crit
+
+The server and client
+([`4ee77b7`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/4ee77b7)),
+the Node image replacing the busybox placeholder
+([`4f05265`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/4f05265)),
+and the app's own spec checks
+([`a162ff5`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/a162ff5))
+are the three commits behind the decisions above.
