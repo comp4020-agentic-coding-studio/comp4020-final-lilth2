@@ -1,10 +1,23 @@
-# Your harness
+# Working rules for this repo
 
-This file is yours, and it arrives empty on purpose. The rules you hold the
-agent to are part of what gets marked, so they should be rules you decided on.
-
-Nothing about the template is recorded here. What the repo ships is explained
-where it lives --- `fly.toml`, the `Dockerfile`, the CI workflow and
-`spec/README.md` each say what they fix --- and the course website publishes the
-[final project brief](https://comp.anu.edu.au/courses/comp4020-agentic-coding-studio/assessments/final-project/).
-What the agent needs to carry from any of it is your call.
+- **Keep the scope to what the current crit actually asks for.** Crit 8 is
+  proof of life, not the finished app — don't pre-build crit 9's real-time
+  polish or crit 10's logging dashboard now just because it's easy while
+  you're in here. Note what's deferred in `PROCESS.md` instead of building it.
+- **The spec in `spec/` is fixed; everything else is mine to decide and you
+  to implement.** Don't weaken or delete `spec/invariants.test.ts`. New
+  checks go in new files.
+- **No native/compiled dependencies if a built-in or pure-JS option covers
+  it.** This app runs in a 256 MB container; `node:sqlite` over
+  `better-sqlite3`, pure-JS libraries over anything with a native build step.
+- **Verify persistence by hand, not just by reading the code.** Before
+  trusting that something survives a restart or redeploy, actually kill the
+  process and bring it back against the same data, and say so in
+  `PROCESS.md` if that's how it was checked.
+- **`README.md` and `PROCESS.md` are rewritten, not appended to, at each
+  crit.** Don't leave stale sections from a prior week sitting alongside new
+  ones.
+- **Commit as the work happens, in small steps.** Don't batch a week's work
+  into one commit — the commit history is part of what's marked.
+- **Never commit secrets.** The Fly token lives in `mise.local.toml`
+  (gitignored) or CI secrets, never in a tracked file.
