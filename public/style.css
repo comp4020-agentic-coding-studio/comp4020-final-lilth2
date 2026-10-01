@@ -1,0 +1,86 @@
+:root {
+  color-scheme: light dark;
+  --ink: #1b1b1b;
+  --paper: #fafaf7;
+  --accent: #2f6b3f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #eceae4;
+    --paper: #15170f;
+    --accent: #7fc98f;
+  }
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+main {
+  width: min(28rem, 90vw);
+  padding: 2rem 1rem 3rem;
+  text-align: center;
+}
+
+.lede {
+  opacity: 0.75;
+  margin-top: -0.5rem;
+}
+
+.pot {
+  margin: 2rem auto 1rem;
+  width: 10rem;
+  height: 10rem;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.plant {
+  --scale: 1;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 50% 50% 45% 45%;
+  background: var(--accent);
+  transform: scaleY(var(--scale));
+  transform-origin: bottom;
+  transition: transform 0.6s ease-out;
+}
+
+button {
+  font: inherit;
+  padding: 0.6rem 1.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--paper);
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+#status {
+  min-height: 2.6rem;
+  opacity: 0.85;
+}
+
+a {
+  color: var(--accent);
+}
+
+.readme {
+  max-width: 38rem;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+  line-height: 1.6;
+}
