@@ -10,11 +10,15 @@
     <main>
       <h1>Tend</h1>
       <p class="lede">One plant. Everyone who visits waters the same one.</p>
+      <p id="drought" class="drought" aria-live="polite" hidden>
+        ⚠️ Drought window — it's drying out about three times faster than usual.
+      </p>
       <div class="pot" aria-hidden="true">
-        <div class="plant" id="plant"></div>
+        <div class="plant" id="plant" data-stage="thriving"></div>
       </div>
       <button id="water">Water it</button>
       <p id="status" aria-live="polite"></p>
+      <p id="rescues" class="rescues" hidden></p>
       <p><a href="/readme/">About this app</a></p>
     </main>
     <script type="module" src="/app.js"></script>

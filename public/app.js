@@ -1,20 +1,41 @@
 const plantEl = document.getElementById("plant");
 const statusEl = document.getElementById("status");
 const waterButton = document.getElementById("water");
+const droughtEl = document.getElementById("drought");
+const rescuesEl = document.getElementById("rescues");
+
+const STAGE_LABEL = {
+  thriving: "It's thriving.",
+  thirsty: "It's getting thirsty.",
+  wilting: "It's wilting — it could use some water.",
+  dormant: "It's gone dormant, brown and curled. Water it to bring it back.",
+};
 
 function render(plant, visitor) {
-  // A size of 1.0 is a seedling; each watering nudges it up. Clamped so a
-  // very well-tended plant doesn't outgrow its pot.
+  // A size of 1.0 is a seedling; each watering nudges it up, permanently —
+  // that part never goes backwards, even while the plant looks neglected.
   const scale = Math.min(1 + plant.size * 0.18, 6);
   plantEl.style.setProperty("--scale", String(scale));
+  plantEl.dataset.stage = plant.stage;
 
-  const lines = [`Watered ${plant.waters} time${plant.waters === 1 ? "" : "s"} in total.`];
+  const lines = [STAGE_LABEL[plant.stage], `Watered ${plant.waters} time${plant.waters === 1 ? "" : "s"} in total.`];
   if (visitor && visitor.waters > 0) {
     lines.push(`You've watered it ${visitor.waters} time${visitor.waters === 1 ? "" : "s"}.`);
   } else {
     lines.push("You haven't watered it yet — go on.");
   }
   statusEl.textContent = lines.join(" ");
+
+  droughtEl.hidden = !plant.isDrought;
+
+  if (plant.nearDeathSaves > 0) {
+    rescuesEl.hidden = false;
+    rescuesEl.textContent = `Rescued from the brink ${plant.nearDeathSaves} time${
+      plant.nearDeathSaves === 1 ? "" : "s"
+    } by people who watered it just in time.`;
+  } else {
+    rescuesEl.hidden = true;
+  }
 }
 
 async function loadState() {
@@ -36,6 +57,11 @@ async function water() {
 
 waterButton.addEventListener("click", water);
 loadState();
+
+// Decay has no event to push when it happens — it's just time passing — so
+// a light poll is what keeps a page open and ignored in sync with it
+// (and with a drought window starting or ending).
+setInterval(loadState, 20_000);
 
 // Real-time layer: everyone watching sees the plant grow the moment anyone,
 // anywhere, waters it. The reconnect loop is what crit 9 asks for next —

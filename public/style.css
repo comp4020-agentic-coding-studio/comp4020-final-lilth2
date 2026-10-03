@@ -45,13 +45,56 @@ main {
 
 .plant {
   --scale: 1;
+  /* Growth (--scale) only ever goes up; vitality is layered on top of it so
+     a long-neglected-but-well-grown plant still reads as "big, but unwell"
+     rather than snapping back to a seedling. */
+  --vitality: 1;
   width: 2.4rem;
   height: 2.4rem;
   border-radius: 50% 50% 45% 45%;
-  background: var(--accent);
-  transform: scaleY(var(--scale));
+  background: var(--plant-color, var(--accent));
+  transform: scaleY(calc(var(--scale) * var(--vitality)));
   transform-origin: bottom;
-  transition: transform 0.6s ease-out;
+  transition:
+    transform 0.6s ease-out,
+    background-color 0.6s ease-out;
+}
+
+.plant[data-stage="thriving"] {
+  --vitality: 1;
+  --plant-color: var(--accent);
+}
+.plant[data-stage="thirsty"] {
+  --vitality: 0.85;
+  --plant-color: #8a9a3f;
+}
+.plant[data-stage="wilting"] {
+  --vitality: 0.65;
+  --plant-color: #b98f2c;
+}
+.plant[data-stage="dormant"] {
+  --vitality: 0.45;
+  --plant-color: #6b5338;
+}
+
+.drought {
+  background: #fff3cd;
+  color: #6b4e00;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .drought {
+    background: #3a2f00;
+    color: #ffd97a;
+  }
+}
+
+.rescues {
+  font-size: 0.85rem;
+  opacity: 0.8;
 }
 
 button {
