@@ -25,9 +25,12 @@ Concretely, for me "good" means:
   next to everyone else's in the same row of the same table. If the plant's
   size were per-visitor, this would just be a slow todo-list; it's the
   sharing that makes the visit worth repeating.
-- **No punishment for returning late.** The plant doesn't wilt if you're
-  gone a month. Tend rewards showing up again, it doesn't guilt you for not
-  having shown up sooner.
+- **Neglect is visible, but never fatal.** If nobody waters it for a while it
+  visibly dries out — smaller, yellowing, eventually dormant and brown — the
+  same honesty a real plant would give you. But it never dies: one watering,
+  from anyone, brings it straight back. The point isn't to punish you for
+  being gone; it's that care has to be kept up, and it's never too late to
+  start again.
 - **Works for a total stranger, immediately.** No README, no tutorial
   overlay — the button says what it does, and the plant visibly responds
   within a second of pressing it.
@@ -58,3 +61,8 @@ remembering them — when they come back. The real-time broadcast (everyone
 sees everyone else's waterings live) and any further polish are explicitly
 next week's job; this week is the plant surviving a redeploy with its size
 intact.
+
+A stranger can also watch it dry out if nobody's tended it for a while, watch
+a drought window make that worse, and see it brought back by the next person
+to water it — the small, honest version of "this needs ongoing care, not a
+one-time fix," which is the whole reason it's a plant and not a counter.
