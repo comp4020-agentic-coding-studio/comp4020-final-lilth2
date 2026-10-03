@@ -42,3 +42,18 @@ it("a stranger who hasn't watered yet sees a clean slate, not someone else's tra
   expect(state.visitor.waters).toBe(0);
   expect(state.visitor.lastWateredAt).toBeNull();
 });
+
+it("watering always reads back as thriving immediately, drought or not", async () => {
+  // The decay curve itself is covered by spec/stage-logic.test.ts against a
+  // synthetic clock; this just checks the live app wires that logic in, by
+  // checking the one instant every clock agrees on: right after a water.
+  const cookie = await freshVisitorCookie();
+  const watered = await fetch(new URL("/api/water", baseUrl), { method: "POST", headers: { cookie } }).then((r) =>
+    r.json(),
+  );
+
+  expect(watered.plant.stage).toBe("thriving");
+  expect(watered.plant.minutesSinceWatered).toBe(0);
+  expect(typeof watered.plant.isDrought).toBe("boolean");
+  expect(typeof watered.plant.nearDeathSaves).toBe("number");
+});
