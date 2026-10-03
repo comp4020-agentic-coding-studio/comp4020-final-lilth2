@@ -7,6 +7,7 @@ import { extname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { marked } from "marked";
 import { WebSocketServer } from "ws";
+import { isDroughtActive, stageFor, type Stage } from "./stage.ts";
 
 const PORT = Number(process.env.PORT ?? 8080);
 // /data is the one path the Fly volume persists; fall back to the repo root
@@ -27,11 +28,32 @@ db.exec(`
     last_watered_at TEXT
   );
 `);
+// Migrations for columns added after the plant's first deploy: ALTER TABLE
+// has no "IF NOT EXISTS" in sqlite, so this just swallows the one error that
+// means "already applied" and re-throws anything else.
+function ensureColumn(table: string, name: string, ddl: string): void {
+  try {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl}`);
+  } catch (err) {
+    if (!(err instanceof Error && err.message.includes("duplicate column name"))) throw err;
+  }
+}
+ensureColumn("plant", "last_watered_at", "TEXT");
+ensureColumn("plant", "near_death_saves", "INTEGER NOT NULL DEFAULT 0");
 db.prepare("INSERT OR IGNORE INTO plant (id, size, waters) VALUES (1, 1.0, 0)").run();
+// A plant migrated from before this column existed has no watering history;
+// start its clock now rather than reading as already-dormant on deploy.
+db.prepare("UPDATE plant SET last_watered_at = COALESCE(last_watered_at, ?) WHERE id = 1").run(
+  new Date().toISOString(),
+);
 
 interface Plant {
   size: number;
   waters: number;
+  stage: Stage;
+  minutesSinceWatered: number;
+  isDrought: boolean;
+  nearDeathSaves: number;
 }
 interface Visitor {
   waters: number;
@@ -39,10 +61,22 @@ interface Visitor {
 }
 
 function getPlant(): Plant {
-  const row = db.prepare("SELECT size, waters FROM plant WHERE id = 1").get() as unknown as Plant;
-  // sqlite's floating point addition drifts (1.15 + 0.15 = 1.2999999999999998);
-  // round for display since nothing downstream needs more than cm precision.
-  return { size: Math.round(row.size * 100) / 100, waters: row.waters };
+  const row = db
+    .prepare("SELECT size, waters, last_watered_at AS lastWateredAt, near_death_saves AS nearDeathSaves FROM plant WHERE id = 1")
+    .get() as unknown as { size: number; waters: number; lastWateredAt: string; nearDeathSaves: number };
+  const now = new Date();
+  const minutesSinceWatered = (now.getTime() - new Date(row.lastWateredAt).getTime()) / 60_000;
+  const isDrought = isDroughtActive(now);
+  return {
+    // sqlite's floating point addition drifts (1.15 + 0.15 = 1.2999999999999998);
+    // round for display since nothing downstream needs more than cm precision.
+    size: Math.round(row.size * 100) / 100,
+    waters: row.waters,
+    stage: stageFor(minutesSinceWatered, isDrought),
+    minutesSinceWatered: Math.round(minutesSinceWatered),
+    isDrought,
+    nearDeathSaves: row.nearDeathSaves,
+  };
 }
 
 function getVisitor(id: string): Visitor {
@@ -53,8 +87,15 @@ function getVisitor(id: string): Visitor {
 }
 
 function waterPlant(visitorId: string): { plant: Plant; visitor: Visitor } {
-  db.prepare("UPDATE plant SET size = size + 0.15, waters = waters + 1 WHERE id = 1").run();
+  // A rescue is counted exactly when a watering lands while the plant is
+  // dormant: watering always jumps the clock back to zero, so the stage
+  // can't read as dormant again until it's genuinely drifted back there —
+  // nothing extra to track to avoid double-counting one dip.
+  const wasDormant = getPlant().stage === "dormant";
   const now = new Date().toISOString();
+  db.prepare(
+    "UPDATE plant SET size = size + 0.15, waters = waters + 1, last_watered_at = ?, near_death_saves = near_death_saves + ? WHERE id = 1",
+  ).run(now, wasDormant ? 1 : 0);
   db.prepare(
     `INSERT INTO visitors (id, waters, last_watered_at) VALUES (?, 1, ?)
      ON CONFLICT(id) DO UPDATE SET waters = waters + 1, last_watered_at = excluded.last_watered_at`,
