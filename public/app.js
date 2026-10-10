@@ -11,6 +11,11 @@ const STAGE_LABEL = {
   dormant: "It's gone dormant, brown and curled. Water it to bring it back.",
 };
 
+// What this client knows about its own visitor — never sent to anyone else,
+// and never changed by someone else's watering, so a broadcast only ever
+// needs to update the plant half of a render.
+let lastVisitor = null;
+
 function render(plant, visitor) {
   // A size of 1.0 is a seedling; each watering nudges it up, permanently —
   // that part never goes backwards, even while the plant looks neglected.
@@ -41,6 +46,7 @@ function render(plant, visitor) {
 async function loadState() {
   const res = await fetch("/api/state");
   const { plant, visitor } = await res.json();
+  lastVisitor = visitor;
   render(plant, visitor);
 }
 
@@ -49,6 +55,7 @@ async function water() {
   try {
     const res = await fetch("/api/water", { method: "POST" });
     const { plant, visitor } = await res.json();
+    lastVisitor = visitor;
     render(plant, visitor);
   } finally {
     waterButton.disabled = false;
@@ -64,17 +71,15 @@ loadState();
 setInterval(loadState, 20_000);
 
 // Real-time layer: everyone watching sees the plant grow the moment anyone,
-// anywhere, waters it. The reconnect loop is what crit 9 asks for next —
-// starting it here now means there's nothing new to wire up later.
+// anywhere, waters it. The broadcast already carries the full plant state —
+// there's no one else's visitor data in it to merge, just this client's own
+// (unchanged by someone else's action) — so a message renders directly,
+// with no extra round trip back to /api/state.
 function connectLive() {
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
   ws.addEventListener("message", (event) => {
     const msg = JSON.parse(event.data);
-    if (msg.type === "plant") {
-      fetch("/api/state")
-        .then((res) => res.json())
-        .then(({ plant, visitor }) => render(plant, visitor));
-    }
+    if (msg.type === "plant") render(msg.plant, lastVisitor);
   });
   ws.addEventListener("close", () => setTimeout(connectLive, 2000));
 }
