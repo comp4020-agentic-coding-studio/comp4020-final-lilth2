@@ -4,8 +4,9 @@ This is a decision record for the final project, in the sense an
 [architecture decision record](https://adr.github.io/) is: not a changelog,
 but the handful of choices that would be expensive to reverse later, and why
 each one went the way it did. It gets rewritten (not appended to) at every
-crit, so this version only covers getting from the brief to crit 8's
-proof-of-life.
+crit — stale framing gets corrected in place rather than left to sit next to
+the current account — so what follows is the whole story so far: crit 8's
+proof-of-life, then crit 9's concurrency decision.
 
 ## Decision: the app is "Tend", a single shared plant
 
@@ -105,7 +106,74 @@ state. The "rescued from the brink" count needs no extra bookkeeping either —
 it only increments when a watering lands while the stage reads `dormant`,
 which can't happen twice in a row once that watering has reset the clock.
 
-## Commits for this crit
+## Decision (crit 9): concurrent waterings compose — there's nothing to merge or lose
+
+**Status:** accepted.
+
+**Context.** The brief's one required decision this week is behavioural, not
+about transport: "what happens when two people change the same thing at
+once." For Tend that's not hypothetical — at the crit itself, pod members
+water the plant from separate devices inside the same second, which is
+exactly the moment the app's whole premise (README's "visible shared
+history": every watering counts, next to everyone else's, in the same row)
+is on the line. The naive risk is a classic lost update: two requests both
+read `size = 1.0`, both compute `1.15`, and whichever write lands second
+silently erases the first person's watering.
+
+Options considered:
+
+1. **Ignore it.** Simplest, but a silently-dropped watering directly
+   contradicts "visible shared history" — the one value this whole app
+   exists to demonstrate.
+2. **Optimistic locking** (a version column; reject and ask the loser to
+   retry). The standard answer for two people editing the same record, but
+   it requires a loser — someone's click has to be told "try again" for the
+   crime of bad timing, which punishes exactly the shared-use moment the app
+   is supposed to welcome.
+3. **Serialise writes behind an explicit queue or lock** around
+   `/api/water`. Removes the race, but adds state and a new failure mode (a
+   request that dies mid-lock) to solve a problem four routes and one
+   counter don't need solved that way.
+4. **Make the operation commutative (chosen).** Every watering has always
+   been written as a relative increment —
+   `size = size + 0.15, waters = waters + 1` in `server.ts`'s `waterPlant`
+   — applied as one atomic `UPDATE`, never as "set it to the value I just
+   computed." Two concurrent increments compose regardless of order or
+   interleaving; there's no version to be behind because no write ever
+   depends on reading the other one first.
+
+**Decision.** Keep watering as a relative, atomic increment at the database
+layer, and treat that as the app's concurrency control rather than an
+implementation detail someone could casually "simplify" later into a
+read-then-write. No locking, no version column, no retry path.
+
+**Consequences.**
+
+- This was true since crit 8's first `waterPlant` and cost nothing new to
+  add — the honest cost here was realising it was already the concurrency
+  decision, and saying so, rather than discovering a gap and patching one in.
+- It's genuinely race-free for free: SQLite's statement-level atomicity means
+  two concurrent `UPDATE`s interleave at the boundary, not inside one.
+  "Believed, not just read off the code" is also why
+  `spec/live.test.ts` fires two waterings at once and checks both land —
+  the kind of claim a reviewer should get to see demonstrated, not asserted.
+- **What this doesn't solve:** commutativity only works because every
+  mutation Tend has is "add one." The day a field means "set this to a
+  specific value" — a chosen name for the plant, a pot colour — this trick
+  stops applying and a real conflict (whose value wins?) comes back. That's
+  deliberately deferred, not solved.
+- **Arguing the option not picked** (option 2, optimistic locking with a
+  visible "someone beat you to it, here's the fresh state" message): it's
+  more honest that contention happened at all, where the chosen design lets
+  two simultaneous waterers each see their own click land without ever
+  learning they were simultaneous. For an app that has to make sense to a
+  total stranger in one sentence, I'd still rather the counter just always
+  go up — but the counter-argument is real, not a straw man, and is the one
+  I'd expect the pod to press on.
+
+## Commits
+
+### Crit 8
 
 The server and client
 ([`4ee77b7`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/4ee77b7)),
@@ -122,3 +190,12 @@ for the stage visuals, and
 ([`858903a`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/858903a))
 for the tests behind the "neglect is visible, but never fatal" decision
 above.
+
+### Crit 9
+
+The client simplification that renders a broadcast directly instead of
+re-fetching
+([`da2479f`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/da2479f))
+and the spec proving the broadcast is live and concurrent waterings compose
+([`dd51752`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/dd51752))
+are the two commits behind this week's concurrency decision above.
