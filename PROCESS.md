@@ -108,6 +108,10 @@ which can't happen twice in a row once that watering has reset the clock.
 
 ## Decision (crit 9): concurrent waterings compose — there's nothing to merge or lose
 
+Written in the shape the brief points to: Michael Nygard's
+[architecture decision record](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions)
+format — title, status, context, decision, consequences.
+
 **Status:** accepted.
 
 **Context.** The brief's one required decision this week is behavioural, not
