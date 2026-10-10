@@ -1,8 +1,8 @@
 # Working rules for this repo
 
-- **Keep the scope to what the current crit actually asks for.** Crit 8 is
-  proof of life, not the finished app — don't pre-build crit 9's real-time
-  polish or crit 10's logging dashboard now just because it's easy while
+- **Keep the scope to what the current crit actually asks for.** Crit 9 is
+  real-time plus one documented concurrency decision — don't pre-build
+  crit 10's server-side logging dashboard now just because it's easy while
   you're in here. Note what's deferred in `PROCESS.md` instead of building it.
 - **The spec in `spec/` is fixed; everything else is mine to decide and you
   to implement.** Don't weaken or delete `spec/invariants.test.ts`. New
