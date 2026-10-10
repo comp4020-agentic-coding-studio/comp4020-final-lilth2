@@ -195,7 +195,10 @@ above.
 
 The client simplification that renders a broadcast directly instead of
 re-fetching
-([`da2479f`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/da2479f))
-and the spec proving the broadcast is live and concurrent waterings compose
-([`dd51752`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/dd51752))
-are the two commits behind this week's concurrency decision above.
+([`da2479f`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/da2479f)),
+the spec proving the broadcast is live and concurrent waterings compose
+([`dd51752`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/dd51752)),
+and a fix to a race in that same spec found by running it repeatedly rather
+than trusting one green pass
+([`ec95e80`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/ec95e80))
+are the commits behind this week's concurrency decision above.
