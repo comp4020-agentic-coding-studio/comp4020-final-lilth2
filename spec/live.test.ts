@@ -9,22 +9,43 @@ const wsUrl = new URL(baseUrl);
 wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
 wsUrl.pathname = "/ws";
 
-function nextMessage(ws: WebSocket): Promise<{ type: string; plant: { waters: number } }> {
-  return new Promise((resolve, reject) => {
-    ws.once("message", (data) => resolve(JSON.parse(data.toString())));
-    ws.once("error", reject);
+interface PlantMessage {
+  type: string;
+  plant: { waters: number };
+}
+
+// The server sends its opening snapshot the instant the upgrade completes,
+// which can race a client-side `ws.once("open", ...)` callback that only
+// starts listening for messages afterwards — so queue messages from the
+// moment the socket exists, and let callers drain that queue instead of
+// attaching a listener per message.
+function messageQueue(ws: WebSocket): () => Promise<PlantMessage> {
+  const queue: PlantMessage[] = [];
+  const waiters: Array<(msg: PlantMessage) => void> = [];
+  ws.on("message", (data) => {
+    const msg = JSON.parse(data.toString()) as PlantMessage;
+    const waiter = waiters.shift();
+    if (waiter) waiter(msg);
+    else queue.push(msg);
   });
+  return () =>
+    new Promise<PlantMessage>((resolve) => {
+      const msg = queue.shift();
+      if (msg) resolve(msg);
+      else waiters.push(resolve);
+    });
 }
 
 it("a watering reaches an already-open connection live, well under a second, no reload", async () => {
   const ws = new WebSocket(wsUrl);
+  const nextMessage = messageQueue(ws);
   await new Promise((resolve) => ws.once("open", resolve));
-  await nextMessage(ws); // the connection's own opening snapshot, not an event
+  await nextMessage(); // the connection's own opening snapshot, not an event
 
   const start = Date.now();
   // A different visitor waters it — this connection never asked for anything.
   await fetch(new URL("/api/water", baseUrl), { method: "POST" });
-  const pushed = await nextMessage(ws);
+  const pushed = await nextMessage();
   const elapsedMs = Date.now() - start;
 
   ws.close();
