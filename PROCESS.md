@@ -171,6 +171,17 @@ read-then-write. No locking, no version column, no retry path.
   go up — but the counter-argument is real, not a straw man, and is the one
   I'd expect the pod to press on.
 
+CI caught a sharper, smaller irony than the decision above: it wasn't the
+*app* racing itself that failed first, it was the *test suite* racing itself.
+`spec/live.test.ts`'s concurrent-watering test and `spec/tend.test.ts`'s
+exact-delta checks both call `/api/water` against the one shared plant, and
+Vitest's default is to run spec files in parallel — which let two files race
+each other's waterings even though neither races itself. Fixed in
+`vitest.config.ts` with `fileParallelism: false`, after reproducing the exact
+CI failure locally by forcing parallelism back on. A reminder that "shared
+mutable state" is a property of the *test runner's* view of the app too, not
+just the app's own concurrency model.
+
 ## Commits
 
 ### Crit 8
@@ -198,7 +209,9 @@ re-fetching
 ([`da2479f`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/da2479f)),
 the spec proving the broadcast is live and concurrent waterings compose
 ([`dd51752`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/dd51752)),
-and a fix to a race in that same spec found by running it repeatedly rather
+a fix to a race in that same spec found by running it repeatedly rather
 than trusting one green pass
-([`ec95e80`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/ec95e80))
+([`ec95e80`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/ec95e80)),
+and the vitest config fix for the cross-file test race CI caught on push
+([`4747e27`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lilth2/commit/4747e27))
 are the commits behind this week's concurrency decision above.
