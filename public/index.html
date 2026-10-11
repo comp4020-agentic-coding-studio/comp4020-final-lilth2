@@ -8,19 +8,131 @@
   </head>
   <body>
     <main>
-      <h1>Tend</h1>
-      <p class="lede">One plant. Everyone who visits waters the same one.</p>
-      <p id="drought" class="drought" aria-live="polite" hidden>
-        ⚠️ Drought window — it's drying out about three times faster than usual.
-      </p>
-      <div class="pot" aria-hidden="true">
-        <div class="plant" id="plant" data-stage="thriving"></div>
+      <h1>Tend's Garden</h1>
+      <p class="lede">Five plants, one shared garden every visitor tends together.</p>
+
+      <div id="hint" class="hint" hidden>
+        <p>
+          Select a plant to open its care panel. Your watering allowance (100 per day) is shared across all five
+          plants, not per plant, with a short cooldown between waterings — the panel always shows how much you have
+          left and when it resets.
+        </p>
+        <button type="button" id="hint-dismiss">Got it</button>
       </div>
-      <button id="water">Water it</button>
-      <p id="status" aria-live="polite"></p>
-      <p id="rescues" class="rescues" hidden></p>
-      <p><a href="/readme/">About this app</a></p>
+
+      <div id="event-banner" class="event-banner" aria-live="polite" hidden></div>
+
+      <p id="drought" class="drought" aria-live="polite" hidden>
+        ⚠️ Drought — every plant's water level drops faster than usual right now.
+      </p>
+
+      <div class="resource-bar" aria-label="Garden resources">
+        <div class="resource">
+          <span class="resource-icon" aria-hidden="true">☀️</span>
+          <span>Community growth: <strong id="sunlight-total">0</strong> pts</span>
+        </div>
+        <div class="resource">
+          <span class="resource-icon" aria-hidden="true">💧</span>
+          <span>Water remaining: <strong id="garden-remaining">–</strong></span>
+        </div>
+        <button type="button" id="collection-button" class="collection-button">
+          🧺 Collection
+          <span id="collection-badge" class="collection-badge" hidden>New</span>
+        </button>
+      </div>
+
+      <div id="achievement-toast" class="achievement-toast" role="status" aria-live="polite" hidden></div>
+
+      <div class="garden-scene" id="garden-scene">
+        <button type="button" class="plant-slot plant-slot--fern" data-plant="fern">
+          <svg class="plant-art" viewBox="0 0 120 160" aria-hidden="true"></svg>
+          <span class="plant-label">Fern</span>
+          <span class="plant-mini-progress"></span>
+        </button>
+        <button type="button" class="plant-slot plant-slot--bamboo" data-plant="bamboo">
+          <svg class="plant-art" viewBox="0 0 120 160" aria-hidden="true"></svg>
+          <span class="plant-label">Bamboo</span>
+          <span class="plant-mini-progress"></span>
+        </button>
+        <button type="button" class="plant-slot plant-slot--tree" data-plant="tree">
+          <svg class="plant-art" viewBox="0 0 120 160" aria-hidden="true"></svg>
+          <span class="plant-label">Tree</span>
+          <span class="plant-mini-progress"></span>
+        </button>
+        <button type="button" class="plant-slot plant-slot--shrub" data-plant="shrub">
+          <svg class="plant-art" viewBox="0 0 120 160" aria-hidden="true"></svg>
+          <span class="plant-label">Flowering Shrub</span>
+          <span class="plant-mini-progress"></span>
+        </button>
+        <button type="button" class="plant-slot plant-slot--fruit" data-plant="fruit">
+          <svg class="plant-art" viewBox="0 0 120 160" aria-hidden="true"></svg>
+          <span class="plant-label">Fruit Tree</span>
+          <span class="plant-mini-progress"></span>
+        </button>
+        <div id="decorations-layer" class="overlay-layer" aria-hidden="true"></div>
+        <div id="weather-layer" class="overlay-layer" aria-hidden="true"></div>
+        <div id="leaf-fall-layer" class="overlay-layer" aria-hidden="true"></div>
+      </div>
+
+      <div class="discovery-row">
+        <p class="discovery-hint">
+          Look closely! Ladybugs sometimes settle on a plant's leaves — click one directly to catch it. Treasures
+          hide in the foliage too; use the button below to look for one.
+        </p>
+        <p class="forage-row">
+          <button type="button" id="forage-button">Inspect foliage</button>
+          <span id="forage-status" aria-live="polite"></span>
+        </p>
+      </div>
+
+      <p id="achievements-list" class="achievements-list" aria-live="polite"></p>
+
+      <p><a href="/readme/">About this garden</a></p>
     </main>
+
+    <div id="modal-backdrop" class="modal-backdrop" hidden></div>
+    <div id="detail-panel" class="detail-panel" hidden role="dialog" aria-modal="true" aria-labelledby="detail-name">
+      <button type="button" id="detail-close" class="detail-close" aria-label="Close">×</button>
+      <div class="detail-panel__body">
+        <div id="detail-art-wrap" class="detail-art-wrap">
+          <svg id="detail-art" class="plant-art plant-art--large" viewBox="0 0 120 160" aria-hidden="true"></svg>
+        </div>
+        <h2 id="detail-name"></h2>
+        <p id="detail-status"></p>
+        <div id="detail-insects" class="detail-insects" hidden>
+          <p id="detail-insects-summary"></p>
+          <p class="detail-insects-hint">Click an insect above to catch it and restore this plant's growth rate.</p>
+        </div>
+        <div class="progress-track" aria-hidden="true"><div id="detail-progress" class="progress-fill"></div></div>
+        <p id="detail-progress-label" class="progress-label"></p>
+        <button type="button" id="detail-water" class="water-button">Water</button>
+        <p id="detail-limit" class="detail-limit" aria-live="polite"></p>
+      </div>
+    </div>
+
+    <div
+      id="collection-panel"
+      class="detail-panel collection-panel"
+      hidden
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="collection-title"
+    >
+      <button type="button" id="collection-close" class="detail-close" aria-label="Close">×</button>
+      <div class="detail-panel__body">
+        <h2 id="collection-title">Collection</h2>
+        <p id="collection-progress" class="progress-label"></p>
+        <p id="collection-empty" class="collection-empty" hidden>
+          Your collection is waiting to grow. Look among the leaves for your first discovery!
+        </p>
+        <div id="collection-groups"></div>
+        <p class="collection-disclosure">
+          Saved to this browser's visitor identity on the server — it survives refreshes and reopening the tab, but
+          there's no account, so it won't follow you to a different browser or device.
+        </p>
+      </div>
+    </div>
+
     <script type="module" src="/app.js"></script>
   </body>
 </html>
