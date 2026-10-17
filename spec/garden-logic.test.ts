@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ACHIEVEMENTS,
+  CODENAME_NOUNS,
   COLLECTIBLES,
   DEFAULT_SPAWN_WEIGHTS,
   collectibleForForageIndex,
@@ -13,11 +14,13 @@ import {
   migrateGrowthUnits,
   moistureStageFor,
   nextSpawnDelaySeconds,
+  pickCodename,
   pickSpawnKind,
   pickWeightedCollectible,
   spawnBatchSize,
   utcMidnightAfter,
   type AchievementGardenView,
+  type CodenameFormat,
   type CollectionLimits,
   type MoistureConfig,
   type WateringLimits,
@@ -424,5 +427,49 @@ describe("insectGrowthMultiplier", () => {
   it("floors at 50% off, however many bugs pile up", () => {
     expect(insectGrowthMultiplier(10, config)).toBe(0.5);
     expect(insectGrowthMultiplier(1000, config)).toBe(0.5);
+  });
+});
+
+describe("pickCodename", () => {
+  const format: CodenameFormat = { codeLength: 3 };
+
+  it("picks the first noun for nounRandomValue 0", () => {
+    expect(pickCodename(CODENAME_NOUNS, format, 0, 0)).toBe(`${CODENAME_NOUNS[0]}-000`);
+  });
+
+  it("picks the last noun for nounRandomValue just under 1, never overruns the array", () => {
+    const justUnderOne = (CODENAME_NOUNS.length - 1) / CODENAME_NOUNS.length + 0.00001;
+    expect(pickCodename(CODENAME_NOUNS, format, justUnderOne, 0).startsWith(CODENAME_NOUNS[CODENAME_NOUNS.length - 1])).toBe(
+      true,
+    );
+    expect(pickCodename(CODENAME_NOUNS, format, 0.999999, 0).startsWith(CODENAME_NOUNS[CODENAME_NOUNS.length - 1])).toBe(
+      true,
+    );
+  });
+
+  it("different nounRandomValue draws select different nouns", () => {
+    const a = pickCodename(CODENAME_NOUNS, format, 0, 0.5);
+    const b = pickCodename(CODENAME_NOUNS, format, 0.5, 0.5);
+    expect(a.split("-")[0]).not.toBe(b.split("-")[0]);
+  });
+
+  it("is deterministic — the same two random draws always produce the same codename", () => {
+    expect(pickCodename(CODENAME_NOUNS, format, 0.37, 0.82)).toBe(pickCodename(CODENAME_NOUNS, format, 0.37, 0.82));
+  });
+
+  it("formats the code as an uppercase, zero-padded base-36 string of the configured length", () => {
+    const codename = pickCodename(CODENAME_NOUNS, format, 0.1, 0.1);
+    const code = codename.split("-")[1];
+    expect(code).toMatch(/^[A-Z0-9]{3}$/);
+  });
+
+  it("never excludes a species id or collectible id from accidentally colliding in meaning", () => {
+    // Not a behavioural test of pickCodename itself — a guard on the noun
+    // list's own content, so a future edit can't accidentally add "Fern" or
+    // "Ladybug" back in and produce a confusing "Fern-7K2 watered the Fern".
+    const confusing = ["tree", "bamboo", "shrub", "fern", "fruit", "ladybug"];
+    for (const noun of CODENAME_NOUNS) {
+      expect(confusing).not.toContain(noun.toLowerCase());
+    }
   });
 });

@@ -361,3 +361,63 @@ export function decideCollection(limits: CollectionLimits, state: CollectionStat
   }
   return { allowed: true };
 }
+
+// A public, non-identifying label for an anonymous visitor — "Maple-7K2" —
+// shown in the UI and in server logs instead of the session cookie itself.
+// Deliberately excludes every species id and collectible id (a plant-themed
+// noun list, picked once up front) so a sentence like "Fern-7K2 watered the
+// Fern" or "Ladybug-4Q1 caught a ladybug" never reads as confusing.
+export const CODENAME_NOUNS: readonly string[] = [
+  "Maple",
+  "Willow",
+  "Birch",
+  "Cedar",
+  "Rowan",
+  "Hazel",
+  "Juniper",
+  "Linden",
+  "Poplar",
+  "Sycamore",
+  "Alder",
+  "Beech",
+  "Larch",
+  "Sorrel",
+  "Clover",
+  "Moss",
+  "Thistle",
+  "Iris",
+  "Poppy",
+  "Violet",
+  "Heather",
+  "Bramble",
+  "Meadow",
+  "Elm",
+] as const;
+
+export interface CodenameFormat {
+  /** Length of the base-36, uppercase code appended after the noun — 3 gives 46,656 codes per noun. */
+  codeLength: number;
+}
+
+// Deterministic given its two random draws (the caller supplies two
+// independent Math.random() outputs, or fixed values in a test) — one
+// attempt at a noun+code pair. A codename genuinely needs two independent
+// choices (which noun, which code), which is why this takes two randomValue
+// parameters instead of the usual one; server.ts is responsible for
+// retrying with a fresh pair of draws on the rare case this collides with
+// an existing codename (see visitor_identity's UNIQUE constraint), the same
+// way it already retries ensureColumn's "duplicate column name" error.
+export function pickCodename(
+  nouns: readonly string[],
+  format: CodenameFormat,
+  nounRandomValue: number,
+  codeRandomValue: number,
+): string {
+  const noun = nouns[Math.min(nouns.length - 1, Math.floor(nounRandomValue * nouns.length))];
+  const space = 36 ** format.codeLength;
+  const code = Math.floor(codeRandomValue * space)
+    .toString(36)
+    .toUpperCase()
+    .padStart(format.codeLength, "0");
+  return `${noun}-${code}`;
+}
