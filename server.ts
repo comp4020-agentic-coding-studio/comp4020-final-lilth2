@@ -198,7 +198,12 @@ db.exec(`
     public_id TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS garden_meta (
+    id TEXT PRIMARY KEY CHECK (id = 'garden'),
+    version INTEGER NOT NULL DEFAULT 0
+  );
 `);
+db.prepare("INSERT OR IGNORE INTO garden_meta (id, version) VALUES ('garden', 0)").run();
 // Migrations for columns added after the plant's first deploy: ALTER TABLE
 // has no "IF NOT EXISTS" in sqlite, so this just swallows the one error that
 // means "already applied" and re-throws anything else.
@@ -364,6 +369,24 @@ function getGarden(): Record<SpeciesId, GardenPlant> {
   return garden;
 }
 
+// A single monotonic counter for "has anything a client renders changed",
+// bumped exactly where garden-visible state actually does — a successful
+// watering, a successful claim, a new spawn — never on a read, a rejection,
+// or an identity/audit-log event, which is what keeps it meaningful as a
+// staleness check: a client that's seen version N has seen every change up
+// to and including N, nothing more needs replaying. Deliberately its own
+// counter rather than reusing audit_log's row id, which also advances on
+// things no client's view of the garden actually depends on.
+function currentGardenVersion(): number {
+  const row = db.prepare("SELECT version FROM garden_meta WHERE id = 'garden'").get() as { version: number };
+  return row.version;
+}
+
+function bumpGardenVersion(): number {
+  db.prepare("UPDATE garden_meta SET version = version + 1 WHERE id = 'garden'").run();
+  return currentGardenVersion();
+}
+
 function getVisitor(id: string): Visitor {
   const row = db.prepare("SELECT waters, last_watered_at AS lastWateredAt FROM visitors WHERE id = ?").get(id) as
     | Visitor
@@ -502,6 +525,7 @@ function waterGardenPlant(visitorId: string, plantId: SpeciesId): WaterResult {
   ).run(visitorId, today, nowIso);
 
   checkAchievements();
+  bumpGardenVersion();
 
   return {
     ok: true,
@@ -607,6 +631,7 @@ function spawnOneCollectible(now: Date): void {
   db.prepare(
     "INSERT INTO garden_collectibles (id, kind, item_id, plant_id, spawned_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
   ).run(randomUUID(), kind, item.id, plantId, now.toISOString(), expiresAt);
+  bumpGardenVersion();
 }
 
 // Checked (not scheduled) on every meaningful request — "only while a user
@@ -754,6 +779,7 @@ function claimCollectible(visitorId: string, requestedId: string | null, filter:
   const after = getVisitorGardenDay(visitorId, today);
   const def = COLLECTIBLES.find((c) => c.id === target.itemId);
   if (!def) throw new Error(`claimed collectible names an unknown catalog item: ${target.itemId}`);
+  bumpGardenVersion();
 
   return {
     ok: true,
@@ -938,6 +964,7 @@ const wss = new WebSocketServer({ noServer: true });
 
 function gardenSnapshot(): {
   type: "garden";
+  version: number;
   garden: Record<SpeciesId, GardenPlant>;
   plant: GardenPlant;
   event: GardenEvent;
@@ -948,6 +975,7 @@ function gardenSnapshot(): {
   const garden = getGarden();
   return {
     type: "garden",
+    version: currentGardenVersion(),
     garden,
     plant: garden.tree,
     event: dailyEventFor(now),
@@ -984,6 +1012,7 @@ const server = createServer((req, res) => {
       JSON.stringify({
         plant: garden.tree,
         garden,
+        version: currentGardenVersion(),
         visitor: getVisitor(visitorId),
         identity: { publicId: identityOf(visitorId) },
         limits: limitsFor(visitorId),

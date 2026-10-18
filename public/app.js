@@ -547,14 +547,24 @@ function connectLive() {
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
   ws.addEventListener("message", (event) => {
     const msg = JSON.parse(event.data);
-    if (msg.type !== "garden" || !state) return;
-    state.garden = msg.garden;
-    state.achievements = msg.achievements;
-    state.event = msg.event;
-    state.collectibles = msg.collectibles; // every client's scene stays in sync: a catch anywhere removes it everywhere
-    state.resources.totalGrowthUnits =
-      Math.round(SPECIES_ORDER.reduce((sum, id) => sum + state.garden[id].growthUnits, 0) * 100) / 100;
-    renderAll();
+    if (!state) return;
+    if (msg.type === "garden") {
+      // A defensive guard, not a real ordering mechanism: messages normally
+      // arrive in order on one open connection, but if one ever doesn't
+      // (a flaky connection re-delivering, or a message queued before a
+      // reconnect's own fresh snapshot lands), this stops an older message
+      // from regressing already-newer state rather than trying to replay
+      // or merge anything.
+      if (typeof msg.version === "number" && typeof state.version === "number" && msg.version < state.version) return;
+      state.version = msg.version;
+      state.garden = msg.garden;
+      state.achievements = msg.achievements;
+      state.event = msg.event;
+      state.collectibles = msg.collectibles; // every client's scene stays in sync: a catch anywhere removes it everywhere
+      state.resources.totalGrowthUnits =
+        Math.round(SPECIES_ORDER.reduce((sum, id) => sum + state.garden[id].growthUnits, 0) * 100) / 100;
+      renderAll();
+    }
   });
   ws.addEventListener("close", () => setTimeout(connectLive, 2000));
 }
