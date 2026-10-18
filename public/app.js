@@ -561,9 +561,16 @@ function connectLive() {
       state.achievements = msg.achievements;
       state.event = msg.event;
       state.collectibles = msg.collectibles; // every client's scene stays in sync: a catch anywhere removes it everywhere
+      state.recentCare = msg.recentCare ?? state.recentCare;
       state.resources.totalGrowthUnits =
         Math.round(SPECIES_ORDER.reduce((sum, id) => sum + state.garden[id].growthUnits, 0) * 100) / 100;
       renderAll();
+    } else if (msg.type === "care") {
+      // A snappier single-entry delta for "this just happened" — the
+      // feed's actual contents always come from the "garden" message's own
+      // recentCare array above, so this is just a nicer-feeling nudge, not
+      // a second source of truth that could ever disagree with it for long.
+      // No UI consumes this yet; rendering lands in a later commit.
     }
   });
   ws.addEventListener("close", () => setTimeout(connectLive, 2000));

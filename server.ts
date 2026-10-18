@@ -127,6 +127,11 @@ const AUDIT_LOG_PRUNE_INTERVAL_MS = 60 * 60 * 1000; // at most once an hour, how
 // suite can assert against *real* persisted log rows rather than trusting
 // logEvent's code by inspection alone — never set on the real Fly deploy.
 const ENABLE_TEST_ENDPOINTS = process.env.ENABLE_TEST_ENDPOINTS === "1";
+// How many recent public actions to keep — a fixed-size ring buffer, pruned
+// at write time rather than lazily like audit_log, since every insert here
+// already happens on a real mutation, not on every request.
+const CARE_FEED_STORED_CAP = Number(process.env.CARE_FEED_STORED_CAP ?? 50);
+const CARE_FEED_VISIBLE_COUNT = Number(process.env.CARE_FEED_VISIBLE_COUNT ?? 15);
 
 // Moisture (short-term watering condition) stays mechanically identical to
 // the original single-plant app's decay curve by default, but is now a
@@ -236,6 +241,15 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS audit_log_prune_state (
     id TEXT PRIMARY KEY CHECK (id = 'prune'),
     last_pruned_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS care_feed (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    actor_public_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    plant_id TEXT NOT NULL,
+    growth_added REAL,
+    item_id TEXT
   );
 `);
 db.prepare("INSERT OR IGNORE INTO garden_meta (id, version) VALUES ('garden', 0)").run();
@@ -606,6 +620,7 @@ function waterGardenPlant(visitorId: string, plantId: SpeciesId, requestId: stri
     outcome: "success",
     detail: { growthAdded, remainingToday: limitsFor(visitorId).remainingToday },
   });
+  recordCareFeed({ actorPublicId, action: "water", plantId, growthAdded, itemId: null });
 
   return {
     ok: true,
@@ -677,6 +692,41 @@ interface CollectibleView {
   plantId: SpeciesId;
   spawnedAt: string;
   expiresAt: string | null;
+}
+
+interface CareFeedEntry {
+  ts: string;
+  actorPublicId: string;
+  action: "water" | "catch-bug" | "claim-treasure";
+  plantId: SpeciesId;
+  growthAdded: number | null;
+  itemId: string | null;
+}
+
+// Every field here is already public-shared data — which plant, how much
+// growth a watering added, which catalog entry was found (never a finder's
+// personal count or any other detail) — the whole point of a public
+// identity in the first place. No visitor_id, quota, or collection detail
+// of any kind is allowed in this table; it is deliberately separate from
+// audit_log, which holds the full, protected record of the same moment.
+function recordCareFeed(entry: Omit<CareFeedEntry, "ts">): void {
+  const ts = new Date().toISOString();
+  db.prepare(
+    "INSERT INTO care_feed (ts, actor_public_id, action, plant_id, growth_added, item_id) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(ts, entry.actorPublicId, entry.action, entry.plantId, entry.growthAdded, entry.itemId);
+  // A fixed-size ring buffer, kept at write time rather than lazily — every
+  // call here already happens on a real mutation, never on a plain read, so
+  // there's no volume concern that needs throttling the way audit_log's
+  // prune does.
+  db.prepare("DELETE FROM care_feed WHERE id <= (SELECT MAX(id) FROM care_feed) - ?").run(CARE_FEED_STORED_CAP);
+}
+
+function getRecentCare(limit: number = CARE_FEED_VISIBLE_COUNT): CareFeedEntry[] {
+  return db
+    .prepare(
+      "SELECT ts, actor_public_id AS actorPublicId, action, plant_id AS plantId, growth_added AS growthAdded, item_id AS itemId FROM care_feed ORDER BY id DESC LIMIT ?",
+    )
+    .all(limit) as unknown as CareFeedEntry[];
 }
 
 function getActiveCollectibles(now: Date): CollectibleView[] {
@@ -915,6 +965,13 @@ function claimCollectible(
     targetId: target.id,
     outcome: "success",
     detail: { itemId: target.itemId, plantId: target.plantId, collectedToday: after.collectedToday },
+  });
+  recordCareFeed({
+    actorPublicId,
+    action: target.kind === "bug" ? "catch-bug" : "claim-treasure",
+    plantId: target.plantId as SpeciesId,
+    growthAdded: null,
+    itemId: target.itemId,
   });
 
   return {
@@ -1170,6 +1227,7 @@ function gardenSnapshot(): {
   event: GardenEvent;
   achievements: ReturnType<typeof getAchievements>;
   collectibles: CollectibleView[];
+  recentCare: CareFeedEntry[];
 } {
   const now = new Date();
   const garden = getGarden();
@@ -1181,7 +1239,22 @@ function gardenSnapshot(): {
     event: dailyEventFor(now),
     achievements: getAchievements(),
     collectibles: getActiveCollectibles(now),
+    recentCare: getRecentCare(),
   };
+}
+
+// A single-entry delta, broadcast right alongside the full "garden" message
+// at each of the three success points above — purely for a snappier
+// "this just happened" UI moment. The feed's actual *contents* always come
+// from the "garden" message's own recentCare array (the authoritative
+// resync both a fresh connection and every broadcastGarden() already carry),
+// so the two message types can never disagree about what's really in it for
+// long, even if a "care" message is ever missed.
+function broadcastCare(entry: CareFeedEntry): void {
+  const message = JSON.stringify({ type: "care", entry, version: currentGardenVersion() });
+  for (const client of wss.clients) {
+    if (client.readyState === client.OPEN) client.send(message);
+  }
 }
 
 function broadcastGarden(): void {
@@ -1220,6 +1293,7 @@ const server = createServer((req, res) => {
         event: dailyEventFor(now),
         achievements: getAchievements(),
         collectibles: getActiveCollectibles(now),
+        recentCare: getRecentCare(),
         collectionLimits: {
           remainingToday: Math.max(0, COLLECTION_LIMITS.dailyLimit - getVisitorGardenDay(visitorId, dateKeyUTC(now)).collectedToday),
           dailyLimit: COLLECTION_LIMITS.dailyLimit,
@@ -1237,7 +1311,11 @@ const server = createServer((req, res) => {
     readJsonBody(req).then((body) => {
       const plantId = isSpeciesId(body.plantId) ? body.plantId : "tree";
       const result = waterGardenPlant(visitorId, plantId, randomUUID());
-      if (result.ok) broadcastGarden();
+      if (result.ok) {
+        broadcastGarden();
+        const [latest] = getRecentCare(1);
+        if (latest) broadcastCare(latest);
+      }
       res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(result));
     });
     return;
@@ -1250,7 +1328,11 @@ const server = createServer((req, res) => {
       if (isSpeciesId(body.plantId)) filter.plantId = body.plantId;
       if (body.kind === "bug" || body.kind === "treasure") filter.kind = body.kind;
       const result = claimCollectible(visitorId, requestedId, filter, randomUUID());
-      if (result.ok) broadcastGarden(); // every client's scene drops this collectible, in sync
+      if (result.ok) {
+        broadcastGarden(); // every client's scene drops this collectible, in sync
+        const [latest] = getRecentCare(1);
+        if (latest) broadcastCare(latest);
+      }
       res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(result));
     });
     return;
