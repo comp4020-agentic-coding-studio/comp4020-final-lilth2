@@ -3,6 +3,10 @@
   --ink: #1b1b1b;
   --paper: #fafaf7;
   --accent: #2f6b3f;
+  --sky: #eaf3ea;
+  --ground: #d9cfa8;
+  --panel: #ffffff;
+  --shadow: rgba(30, 25, 10, 0.18);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -10,7 +14,15 @@
     --ink: #eceae4;
     --paper: #15170f;
     --accent: #7fc98f;
+    --sky: #1b2418;
+    --ground: #3a3220;
+    --panel: #1f2318;
+    --shadow: rgba(0, 0, 0, 0.5);
   }
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
@@ -21,70 +33,88 @@ body {
   background: var(--paper);
   color: var(--ink);
   font-family: ui-sans-serif, system-ui, sans-serif;
+  /* A safety net, not a substitute for sizing things to fit — a single
+     unexpectedly long word should wrap instead of forcing page-level
+     horizontal scroll. */
+  overflow-wrap: break-word;
 }
 
 main {
-  width: min(28rem, 90vw);
-  padding: 2rem 1rem 3rem;
+  /* ~90-95% of the viewport on desktop, capped at 1600px (100rem at the
+     16px root used throughout) — scaling the container itself, not a page
+     zoom/transform, so children can still react to their own size. */
+  width: min(100rem, 94vw);
+  padding: 1rem 0.75rem 2rem;
   text-align: center;
+}
+
+h1 {
+  /* Scales down on narrow viewports so a single word (e.g. "Garden") can
+     never be wider than the viewport itself — found at 200% browser zoom on
+     a phone-width screen, where the default ~2em heading overflowed instead
+     of wrapping (a word only wraps at whitespace, never mid-word, without
+     this). */
+  font-size: clamp(1.5rem, 5vw, 2.25rem);
+  margin-bottom: 0.25rem;
 }
 
 .lede {
   opacity: 0.75;
-  margin-top: -0.5rem;
+  margin-top: 0;
 }
 
-.pot {
-  margin: 2rem auto 1rem;
-  width: 10rem;
-  height: 10rem;
+/* --- hint / banners --- */
+
+.hint,
+.event-banner,
+.achievement-toast,
+.drought {
+  border-radius: 0.6rem;
+  padding: 0.5rem 0.9rem;
+  font-size: 1rem;
+  margin: 0.4rem 0;
+}
+
+.hint {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
   display: flex;
-  align-items: flex-end;
-  justify-content: center;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  text-align: left;
+}
+/* Same author-beats-UA trap as .detail-panel above: without this, the
+   explicit display:flex means `el.hint.hidden = true` (set when "Got it" is
+   clicked, or whenever a returning visitor already dismissed it) never
+   actually hides the banner — found while checking this round's layout
+   changes, but it predates them. */
+.hint[hidden] {
+  display: none;
+}
+.hint button {
+  flex: none;
 }
 
-.plant {
-  --scale: 1;
-  /* Growth (--scale) only ever goes up; vitality is layered on top of it so
-     a long-neglected-but-well-grown plant still reads as "big, but unwell"
-     rather than snapping back to a seedling. */
-  --vitality: 1;
-  width: 2.4rem;
-  height: 2.4rem;
-  border-radius: 50% 50% 45% 45%;
-  background: var(--plant-color, var(--accent));
-  transform: scaleY(calc(var(--scale) * var(--vitality)));
-  transform-origin: bottom;
-  transition:
-    transform 0.6s ease-out,
-    background-color 0.6s ease-out;
+.event-banner {
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
 }
 
-.plant[data-stage="thriving"] {
-  --vitality: 1;
-  --plant-color: var(--accent);
+.achievement-toast {
+  background: #fff3cd;
+  color: #6b4e00;
+  font-weight: 600;
 }
-.plant[data-stage="thirsty"] {
-  --vitality: 0.85;
-  --plant-color: #8a9a3f;
-}
-.plant[data-stage="wilting"] {
-  --vitality: 0.65;
-  --plant-color: #b98f2c;
-}
-.plant[data-stage="dormant"] {
-  --vitality: 0.45;
-  --plant-color: #6b5338;
+@media (prefers-color-scheme: dark) {
+  .achievement-toast {
+    background: #3a2f00;
+    color: #ffd97a;
+  }
 }
 
 .drought {
   background: #fff3cd;
   color: #6b4e00;
-  border-radius: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.9rem;
 }
-
 @media (prefers-color-scheme: dark) {
   .drought {
     background: #3a2f00;
@@ -92,29 +122,708 @@ main {
   }
 }
 
-.rescues {
-  font-size: 0.85rem;
-  opacity: 0.8;
+/* --- resource bar --- */
+
+.resource-bar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  font-size: 1rem;
+  margin: 0.5rem 0;
 }
+.resource {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.resource-icon {
+  font-size: 1.1rem;
+}
+
+.identity-disclosure {
+  font-size: 0.875rem;
+  opacity: 0.7;
+  max-width: 34rem;
+  margin: 0 auto 0.5rem;
+  text-align: center;
+}
+
+.collection-button {
+  position: relative;
+  background: none;
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--paper));
+  font-size: 1rem;
+  padding: 0.4rem 1rem;
+}
+.collection-badge {
+  position: absolute;
+  top: -0.4rem;
+  right: -0.4rem;
+  background: #c0482f;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  line-height: 1.3;
+}
+
+/* --- garden scene --- */
+
+.garden-scene {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(5.5rem, 1fr));
+  align-items: end;
+  gap: clamp(0.3rem, 1.5vw, 1.25rem);
+  margin: 0.75rem 0 0.75rem;
+  padding: clamp(1rem, 2.5vw, 2rem) clamp(0.5rem, 2vw, 1.5rem) clamp(1.5rem, 3vw, 2.5rem);
+  border-radius: 1.2rem;
+  background: linear-gradient(to bottom, var(--sky) 0%, var(--sky) 72%, var(--ground) 72%, var(--ground) 100%);
+  /* A fallback, not the plan: every size below is chosen to fit at the
+     breakpoints this was checked against (390 - 1600px wide), so this
+     scrollbar should never actually appear there. */
+  overflow-x: auto;
+  overflow-y: visible;
+  min-height: clamp(14rem, 26vw, 23rem);
+}
+
+.plant-slot {
+  grid-row: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  background: none;
+  border: none;
+  padding: 0.3rem;
+  cursor: pointer;
+  border-radius: 0.6rem;
+  min-width: 3.2rem;
+}
+.plant-slot:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+.plant-slot:hover .plant-art {
+  filter: brightness(1.05);
+}
+
+.plant-slot--fern { grid-column: 1; }
+.plant-slot--bamboo { grid-column: 2; }
+.plant-slot--tree { grid-column: 3; }
+.plant-slot--shrub { grid-column: 4; }
+.plant-slot--fruit { grid-column: 5; }
+
+/* Sized with clamp() (scales with viewport width, not a page transform) so
+   desktop gets a genuinely bigger scene instead of just a wider empty
+   margin — and staggered per species (tree tallest, fern shortest) for a
+   "high-low, evenly spread" silhouette instead of five equal boxes. */
+.plant-art {
+  width: 100%;
+  height: clamp(6.5rem, 13vw, 11rem);
+  overflow: visible;
+}
+.plant-slot--tree .plant-art { height: clamp(10rem, 20vw, 16rem); }
+.plant-slot--bamboo .plant-art { height: clamp(8rem, 16vw, 13rem); }
+.plant-slot--fruit .plant-art { height: clamp(7.5rem, 15vw, 12rem); }
+.plant-slot--shrub .plant-art { height: clamp(6rem, 12vw, 10rem); }
+.plant-slot--fern .plant-art { height: clamp(5.5rem, 11vw, 9rem); }
+
+/* .plant-slot is a <button>, which inherits the generic button rule's pale
+   `color: var(--paper)` (meant for buttons with a solid accent background)
+   — on a transparent plant slot that left the label as pale text on the
+   light sky/ground gradient, barely readable. A small background chip with
+   dark text fixes it regardless of what's behind it. */
+.plant-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
+  color: #1c3b24;
+}
+@media (prefers-color-scheme: dark) {
+  .plant-label {
+    background: rgba(8, 12, 7, 0.62);
+    color: #d7f5df;
+  }
+}
+
+/* The two things that used to need the detail panel open to see at all —
+   progress to the next stage, and whether insects are holding it back —
+   shown at a glance right on the scene instead. */
+.plant-mini-progress {
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.02rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.5);
+  color: #1c3b24;
+}
+@media (prefers-color-scheme: dark) {
+  .plant-mini-progress {
+    background: rgba(8, 12, 7, 0.5);
+    color: #d7f5df;
+  }
+}
+
+.overlay-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+/* --- wind sway: rotates around the branch's own attachment point, never
+   translates the whole plant --- */
+
+.sway-branch {
+  animation: sway 4s ease-in-out infinite;
+}
+.sway-delay-0 { animation-delay: 0s; }
+.sway-delay-1 { animation-delay: -1.1s; }
+.sway-delay-2 { animation-delay: -2.3s; }
+.sway-delay-3 { animation-delay: -3.2s; }
+
+@keyframes sway {
+  0%, 100% { transform: rotate(-1.4deg); }
+  50% { transform: rotate(1.4deg); }
+}
+
+.weather-breeze .sway-branch {
+  animation-duration: 2.2s;
+}
+.weather-breeze .sway-branch {
+  animation-name: sway-strong;
+}
+@keyframes sway-strong {
+  0%, 100% { transform: rotate(-3.2deg); }
+  50% { transform: rotate(3.2deg); }
+}
+
+/* --- click feedback --- */
+
+.just-clicked .plant-art {
+  animation: nudge 0.4s ease-out;
+}
+@keyframes nudge {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.06) rotate(-1deg); }
+  100% { transform: scale(1); }
+}
+
+/* --- growth / watering feedback --- */
+
+.just-watered .plant-art {
+  animation: grow-pulse 1.2s ease-out;
+}
+@keyframes grow-pulse {
+  0% { filter: drop-shadow(0 0 0 transparent); }
+  30% { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent) 60%, transparent)); }
+  100% { filter: drop-shadow(0 0 0 transparent); }
+}
+
+.new-stage .plant-art {
+  animation: new-stage-flourish 1.6s ease-out;
+}
+@keyframes new-stage-flourish {
+  0% { transform: scale(1); }
+  20% { transform: scale(1.12); }
+  45% { transform: scale(0.98); }
+  70% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.water-ripple {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 1.4rem;
+  height: 0.6rem;
+  margin-left: -0.7rem;
+  border: 2px solid color-mix(in srgb, var(--accent) 70%, #6cc6ff);
+  border-radius: 50%;
+  opacity: 0.8;
+  animation: ripple 0.8s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes ripple {
+  0% { transform: scale(0.3); opacity: 0.9; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+/* --- falling leaves: spawned sparingly by app.js, recycled on animationend --- */
+
+.falling-leaf {
+  position: absolute;
+  width: 0.4rem;
+  height: 0.4rem;
+  background: var(--leaf-color, var(--accent));
+  border-radius: 0 60% 0 60%;
+  animation: leaf-fall 3.4s ease-in forwards;
+  pointer-events: none;
+}
+@keyframes leaf-fall {
+  0% { transform: translate(0, 0) rotate(0deg); opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translate(var(--drift, 20px), 5.5rem) rotate(200deg); opacity: 0; }
+}
+
+/* --- daily weather particles --- */
+
+.raindrop {
+  position: absolute;
+  top: -1rem;
+  width: 2px;
+  height: 0.7rem;
+  background: #6cc6ff;
+  opacity: 0.6;
+  animation: rain-fall 1.1s linear forwards;
+}
+@keyframes rain-fall {
+  to { transform: translateY(9rem); opacity: 0; }
+}
+
+.butterfly {
+  position: absolute;
+  top: 1rem;
+  left: -5%;
+  font-size: 1.1rem;
+  animation: butterfly-drift 6s ease-in-out forwards;
+}
+@keyframes butterfly-drift {
+  0% { left: -5%; transform: translateY(0); }
+  25% { transform: translateY(-1.2rem); }
+  50% { transform: translateY(0.6rem); }
+  75% { transform: translateY(-0.8rem); }
+  100% { left: 105%; transform: translateY(0); }
+}
+
+.forage-sparkle {
+  position: absolute;
+  bottom: 30%;
+  font-size: 1.2rem;
+  animation: sparkle-rise 1s ease-out forwards;
+}
+.forage-sparkle::before {
+  content: "✨";
+}
+@keyframes sparkle-rise {
+  0% { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(-2rem); opacity: 0; }
+}
+
+.firefly-group .firefly {
+  animation: firefly-blink 2.4s ease-in-out infinite;
+}
+@keyframes firefly-blink {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
+}
+
+.decoration-art {
+  position: absolute;
+  bottom: 0.2rem;
+  width: 2.4rem;
+  height: 1.6rem;
+  transform: translateX(-50%);
+}
+
+/* --- garden discovery: a small collectible hiding among the leaves --- */
+
+.discovery-row {
+  margin: 0.5rem 0;
+}
+.discovery-hint {
+  font-size: 0.9rem;
+  opacity: 0.8;
+  max-width: 32rem;
+  margin: 0 auto 0.5rem;
+}
+
+.collectible {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  /* Re-enables clicks: its parent .overlay-layer is pointer-events:none so
+     it never blocks the plant art underneath, but the collectible itself
+     must still be clickable — and its own click handler stops the event
+     there, so it never also opens the enlarged view. */
+  pointer-events: auto;
+  /* >=44px hit area on every side — the visible glyph is smaller, centred
+     inside it, so the *tappable* region is what meets the touch-target
+     minimum, not just what's drawn. */
+  width: 2.75rem;
+  height: 2.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* A soft halo behind the glyph — without it, a red ladybug can
+     disappear against a Fruit Tree's red fruit, or a sparkle against a
+     bright background; this keeps any collectible visible and visually
+     distinct from the plant art and decorative particles behind it,
+     regardless of what colour that happens to be. */
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.22) 55%, transparent 75%);
+  border: none;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.3));
+}
+/* A treasure stays an abstract sparkle, so a gentle glow suits it; a bug is
+   now a real, recognisable ladybug illustration and reads as "a thing sitting
+   there" without needing one. The brief allows a bug to crawl or wobble
+   slightly, but only on the condition that it never makes catching harder —
+   a first attempt at a small continuous drift did exactly that: it kept the
+   element's bounding box in constant motion, which a real pointer (and
+   every browser-automation tool, the same actionability check this app's
+   own tests rely on) treats as "not stable enough to click precisely" even
+   at a couple of pixels of amplitude. Given the brief states "never
+   impedes catching" as the one hard requirement and the crawl itself as
+   optional, a bug stays still — reliably clickable beats a cosmetic wobble. */
+.collectible--treasure {
+  animation: collectible-glow 1.6s ease-in-out infinite;
+}
+.collectible--bug svg {
+  display: block;
+  /* ~24px visible glyph inside the 44px tappable circle, per the brief's
+     20-28px range. */
+  width: 24px;
+  height: 24px;
+  /* Without this, the flex layout's default shrink behaviour recomputes a
+     replaced element's (the SVG's) used width from its own content's
+     aspect ratio instead of respecting the explicit 24px — found by
+     bisecting why the ladybug rendered squashed to ~6px wide. */
+  flex-shrink: 0;
+}
+.collectible:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+.collectible:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+/* Glow/opacity only, never size — a target that keeps resizing itself is
+   harder to click precisely, for a person or for automation alike. */
+@keyframes collectible-glow {
+  0%, 100% { filter: drop-shadow(0 0 1px color-mix(in srgb, var(--accent) 50%, transparent)); opacity: 0.85; }
+  50% { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 80%, transparent)); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .collectible {
+    animation: none;
+  }
+}
+
+/* --- reduced motion: no moving particles or sway, state still reads from
+   colour/shape/text, which don't depend on any animation --- */
+@media (prefers-reduced-motion: reduce) {
+  .sway-branch,
+  .just-clicked .plant-art,
+  .just-watered .plant-art,
+  .new-stage .plant-art,
+  .water-ripple,
+  .falling-leaf,
+  .raindrop,
+  .butterfly,
+  .forage-sparkle,
+  .firefly-group .firefly {
+    animation: none !important;
+  }
+}
+
+/* --- enlarged plant view: a true modal dialog, centered over a backdrop,
+   on every screen size — opening/closing it only ever toggles `hidden` and
+   re-renders its own independent SVG, so it never touches plant data or the
+   background scene's running animations. --- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 12, 6, 0.45);
+  z-index: 29;
+}
+
+.detail-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  text-align: left;
+  background: var(--panel);
+  border-radius: 1rem;
+  width: min(28rem, 92vw);
+  max-height: 88vh;
+  box-shadow: 0 8px 32px var(--shadow);
+  /* The panel itself doesn't scroll — only .detail-panel__body does (see
+     below) — so the close button, positioned relative to this outer box,
+     never scrolls out of reach even when the content inside is long enough
+     to need scrolling. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* An author `display` rule always wins over the UA stylesheet's
+   `[hidden] { display: none }`, regardless of specificity — so without this,
+   setting display:flex above would silently defeat the `hidden` attribute
+   app.js relies on to show/hide this panel, and both panels could end up
+   visible at once. */
+.detail-panel[hidden] {
+  display: none;
+}
+.detail-panel__body {
+  overflow-y: auto;
+  padding: 1rem 1.1rem 1.2rem;
+}
+.collection-panel {
+  width: min(36rem, 94vw);
+}
+.collection-empty {
+  opacity: 0.8;
+  margin: 1rem 0;
+}
+.collection-groups h3 {
+  font-size: 1rem;
+  margin: 1rem 0 0.4rem;
+}
+.collection-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  gap: 0.6rem;
+}
+.collection-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.6rem;
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--panel));
+}
+.collection-card--undiscovered {
+  opacity: 0.55;
+  filter: grayscale(1);
+}
+.collection-card--new {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.collection-new-flag {
+  position: absolute;
+  top: -0.5rem;
+  right: 0.4rem;
+  background: var(--accent);
+  color: var(--paper);
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+}
+.collection-icon {
+  font-size: 1.6rem;
+}
+.collection-name {
+  font-weight: 600;
+  font-size: 1rem;
+}
+.collection-desc {
+  font-size: 0.875rem;
+  opacity: 0.85;
+}
+.collection-meta {
+  font-size: 0.875rem;
+  opacity: 0.65;
+}
+.collection-disclosure {
+  font-size: 0.875rem;
+  opacity: 0.75;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 15%, var(--panel));
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  text-decoration: underline;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.link-button:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.detail-art-wrap {
+  position: relative;
+}
+.plant-art--large {
+  display: block;
+  width: 100%;
+  height: 12rem;
+  overflow: visible;
+  margin: 0.25rem 0 0.5rem;
+}
+.detail-close {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  z-index: 1;
+  /* >=44px hit area, matching .collectible's touch target — it used to be
+     well under that (font-size plus a little padding), too small to meet
+     the stated minimum. */
+  width: 2.75rem;
+  height: 2.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--ink);
+  border-radius: 50%;
+}
+.detail-close:focus-visible,
+.water-button:focus-visible,
+#forage-button:focus-visible,
+#hint-dismiss:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+#detail-name {
+  margin: 0 1.6rem 0.3rem 0;
+}
+.progress-track {
+  width: 100%;
+  height: 0.5rem;
+  background: color-mix(in srgb, var(--accent) 15%, var(--panel));
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 0.5rem 0 0.25rem;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.4s ease-out;
+}
+.progress-label,
+.detail-limit {
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+.detail-insects {
+  background: color-mix(in srgb, #b98f2c 12%, var(--panel));
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  margin: 0.5rem 0;
+}
+.detail-insects p {
+  margin: 0 0 0.3rem;
+  font-size: 0.9rem;
+}
+.detail-insects-hint {
+  opacity: 0.85;
+}
+
+/* --- buttons --- */
 
 button {
   font: inherit;
-  padding: 0.6rem 1.4rem;
+  /* >=44px touch target on every ordinary button, not just the collectibles
+     and the panel close buttons — these measured ~37px tall before. */
+  min-height: 2.75rem;
+  padding: 0.5rem 1.2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 999px;
   border: 1px solid var(--accent);
   background: var(--accent);
   color: var(--paper);
   cursor: pointer;
 }
-
 button:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: default;
 }
+.water-button {
+  width: 100%;
+  margin-top: 0.4rem;
+}
+#hint-dismiss {
+  background: none;
+  color: var(--accent);
+  padding: 0.35rem 0.8rem;
+}
 
-#status {
-  min-height: 2.6rem;
+.forage-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+#forage-button {
+  background: none;
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--paper));
+}
+
+.achievements-list {
+  font-size: 0.9rem;
   opacity: 0.85;
+}
+
+.care-feed {
+  max-width: 36rem;
+  margin: 0.75rem auto;
+  text-align: left;
+}
+.care-feed-heading {
+  font-size: 1rem;
+  margin: 0 0 0.4rem;
+}
+.care-feed-empty {
+  font-size: 0.9rem;
+  opacity: 0.7;
+  margin: 0;
+}
+.care-feed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 10rem;
+  overflow-y: auto;
+  font-size: 0.9rem;
+}
+.care-feed-list li {
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
+.care-feed-time {
+  opacity: 0.6;
+  font-size: 0.8rem;
 }
 
 a {
@@ -126,4 +835,57 @@ a {
   margin: 0 auto;
   padding: 2rem 1rem 4rem;
   line-height: 1.6;
+}
+
+/* --- mobile: plant buttons stay big enough to tap; the modal becomes a
+   bottom sheet instead of a floating centered card, which keeps it
+   reachable with a thumb and keeps the Water button from landing under a
+   software keyboard or a notch. --- */
+@media (max-width: 30rem) {
+  /* Five equal-width columns made every plant roughly a fifth as wide as the
+     screen, which is what left seedlings reading as a sliver and squeezed
+     labels into wrapping. This puts the tree in a wider centre column
+     spanning both rows — it stays the clear focal point — with the other
+     four stacked two-per-side where each gets noticeably more width than
+     before. */
+  .garden-scene {
+    grid-template-columns: 1fr 1.3fr 1fr;
+    grid-template-rows: repeat(2, auto);
+    grid-template-areas:
+      "fern tree shrub"
+      "bamboo tree fruit";
+    gap: 0.5rem 0.4rem;
+    padding: 1rem 0.5rem 1.25rem;
+    min-height: clamp(15rem, 62vw, 19rem);
+  }
+  .plant-slot--fern { grid-area: fern; }
+  .plant-slot--bamboo { grid-area: bamboo; }
+  .plant-slot--tree { grid-area: tree; align-self: end; }
+  .plant-slot--shrub { grid-area: shrub; }
+  .plant-slot--fruit { grid-area: fruit; }
+  /* The desktop clamp()s above bottom out at sizes meant for a wide scene —
+     at a cramped phone width those minimums would force art taller than
+     its own column, wasting vertical space on blank letterboxing (the SVG
+     preserves its aspect ratio instead of stretching). These give mobile
+     its own, smaller staggered scale instead — sized for a two-per-side
+     column that's wider than the old five-across layout gave it. */
+  .plant-art { height: clamp(5rem, 26vw, 6.5rem); }
+  .plant-slot--tree .plant-art { height: clamp(9rem, 44vw, 12rem); }
+  .plant-slot--bamboo .plant-art { height: clamp(6rem, 30vw, 7.5rem); }
+  .plant-slot--fruit .plant-art { height: clamp(5.5rem, 28vw, 7rem); }
+  .plant-slot--shrub .plant-art { height: clamp(5rem, 24vw, 6.5rem); }
+  .plant-slot--fern .plant-art { height: clamp(4.5rem, 22vw, 6rem); }
+  .plant-label {
+    font-size: 0.8rem;
+  }
+  .detail-panel {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    transform: none;
+    width: 100%;
+    max-height: 75vh;
+    border-radius: 1rem 1rem 0 0;
+  }
 }
