@@ -53,10 +53,13 @@ over" — it's a real, durable row, reachable by SSHing into the machine and
 querying the database directly:
 
 ```sh
-mise exec -- flyctl ssh console -a comp4020-final-lilth2
-# inside the machine:
-sqlite3 /data/tend.db "select ts, event, actor_public_id, outcome, reason_code from audit_log order by id desc limit 50;"
+mise exec -- flyctl ssh console -a comp4020-final-lilth2 -C "node -e \"const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('/data/tend.db');console.log(JSON.stringify(db.prepare('select ts, event, actor_public_id, outcome, reason_code from audit_log order by id desc limit 50').all(), null, 2));\""
 ```
+
+(There's no `sqlite3` CLI binary in the Alpine container — the app itself
+never needed one, since `node:sqlite` is built into Node. This command uses
+the same module directly, confirmed working against the real deployed
+volume, not assumed from reading the code.)
 
 `audit_log` is pruned lazily (no background timer — checked the same way
 collectible spawning already is, as a side effect of a real request) to a
