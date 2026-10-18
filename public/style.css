@@ -142,6 +142,14 @@ h1 {
   font-size: 1.1rem;
 }
 
+.identity-disclosure {
+  font-size: 0.875rem;
+  opacity: 0.7;
+  max-width: 34rem;
+  margin: 0 auto 0.5rem;
+  text-align: center;
+}
+
 .collection-button {
   position: relative;
   background: none;
@@ -781,6 +789,41 @@ button:disabled {
 .achievements-list {
   font-size: 0.9rem;
   opacity: 0.85;
+}
+
+.care-feed {
+  max-width: 36rem;
+  margin: 0.75rem auto;
+  text-align: left;
+}
+.care-feed-heading {
+  font-size: 1rem;
+  margin: 0 0 0.4rem;
+}
+.care-feed-empty {
+  font-size: 0.9rem;
+  opacity: 0.7;
+  margin: 0;
+}
+.care-feed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 10rem;
+  overflow-y: auto;
+  font-size: 0.9rem;
+}
+.care-feed-list li {
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
+.care-feed-time {
+  opacity: 0.6;
+  font-size: 0.8rem;
 }
 
 a {

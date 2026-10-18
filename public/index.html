@@ -27,6 +27,10 @@
       </p>
 
       <div class="resource-bar" aria-label="Garden resources">
+        <div class="resource identity-badge">
+          <span class="resource-icon" aria-hidden="true">🪪</span>
+          <span>You are Gardener <strong id="identity-public-id">–</strong></span>
+        </div>
         <div class="resource">
           <span class="resource-icon" aria-hidden="true">☀️</span>
           <span>Community growth: <strong id="sunlight-total">0</strong> pts</span>
@@ -40,6 +44,11 @@
           <span id="collection-badge" class="collection-badge" hidden>New</span>
         </button>
       </div>
+      <p class="identity-disclosure">
+        This codename is tied to this browser, not to you personally — clearing cookies or switching devices makes
+        you a new gardener. It doesn't stop the same person from showing up more than once; it just keeps each
+        visit's trace separate.
+      </p>
 
       <div id="achievement-toast" class="achievement-toast" role="status" aria-live="polite" hidden></div>
 
@@ -72,6 +81,12 @@
         <div id="decorations-layer" class="overlay-layer" aria-hidden="true"></div>
         <div id="weather-layer" class="overlay-layer" aria-hidden="true"></div>
         <div id="leaf-fall-layer" class="overlay-layer" aria-hidden="true"></div>
+      </div>
+
+      <div class="care-feed">
+        <h2 class="care-feed-heading">Recent garden care</h2>
+        <p id="care-feed-empty" class="care-feed-empty" hidden>Nobody's tended the garden yet — be the first.</p>
+        <ul id="care-feed-list" class="care-feed-list" aria-live="polite"></ul>
       </div>
 
       <div class="discovery-row">

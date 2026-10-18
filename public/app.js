@@ -38,6 +38,9 @@ const el = {
   collectionProgress: document.getElementById("collection-progress"),
   collectionEmpty: document.getElementById("collection-empty"),
   collectionGroups: document.getElementById("collection-groups"),
+  identityPublicId: document.getElementById("identity-public-id"),
+  careFeedList: document.getElementById("care-feed-list"),
+  careFeedEmpty: document.getElementById("care-feed-empty"),
 };
 
 const ACHIEVEMENT_LABELS = {
@@ -112,6 +115,46 @@ function renderSlot(id) {
 function renderResourceBar() {
   el.sunlightTotal.textContent = Math.round(state.resources.totalGrowthUnits).toLocaleString();
   el.gardenRemaining.textContent = `${state.limits.remainingToday} / ${state.limits.dailyLimit}`;
+}
+
+function renderIdentityBadge() {
+  el.identityPublicId.textContent = state.identity?.publicId ?? "–";
+}
+
+function relativeTime(iso) {
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 10) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  return `${hours}h ago`;
+}
+
+function careFeedSentence(entry) {
+  const plantLabel = SPECIES[entry.plantId]?.label ?? entry.plantId;
+  if (entry.action === "water") {
+    const amount = entry.growthAdded < 1 ? entry.growthAdded.toFixed(2) : String(entry.growthAdded);
+    return `${entry.actorPublicId} watered the ${plantLabel} · +${amount} growth`;
+  }
+  const info = COLLECTIBLE_INFO[entry.itemId];
+  const itemLabel = info?.label ?? entry.itemId;
+  return entry.action === "catch-bug"
+    ? `${entry.actorPublicId} caught a ${itemLabel} on ${plantLabel}`
+    : `${entry.actorPublicId} found ${itemLabel} on ${plantLabel}`;
+}
+
+// A limited, already-public slice of the garden's activity — codenames,
+// plants, and the same growth numbers the resource bar already shows for
+// everyone. Never a visitor's quota, collection contents, or session
+// detail, which is exactly what keeps this different from the protected
+// audit log the server also keeps.
+function renderCareFeed() {
+  const entries = state.recentCare ?? [];
+  el.careFeedEmpty.hidden = entries.length > 0;
+  el.careFeedList.innerHTML = entries
+    .map((entry) => `<li>${careFeedSentence(entry)} <span class="care-feed-time">· ${relativeTime(entry.ts)}</span></li>`)
+    .join("");
 }
 
 function renderEventBanner() {
@@ -238,11 +281,13 @@ function renderDetailPanel() {
 
 function renderAll() {
   renderResourceBar();
+  renderIdentityBadge();
   renderEventBanner();
   el.drought.hidden = !state.garden.tree.isDrought;
   SPECIES_ORDER.forEach(renderSlot);
   renderDecorations();
   renderCollectibles();
+  renderCareFeed();
   renderAchievementsList();
   announceNewAchievements();
   renderDetailPanel();
@@ -566,11 +611,12 @@ function connectLive() {
         Math.round(SPECIES_ORDER.reduce((sum, id) => sum + state.garden[id].growthUnits, 0) * 100) / 100;
       renderAll();
     } else if (msg.type === "care") {
-      // A snappier single-entry delta for "this just happened" — the
-      // feed's actual contents always come from the "garden" message's own
-      // recentCare array above, so this is just a nicer-feeling nudge, not
-      // a second source of truth that could ever disagree with it for long.
-      // No UI consumes this yet; rendering lands in a later commit.
+      // Intentionally a no-op: the accompanying "garden" broadcast (sent
+      // right alongside this one on the server, see broadcastCare's own
+      // comment) already carries the updated recentCare array and already
+      // triggers a full renderAll() above — this message exists for a
+      // future "flash the latest entry" animation, not as a second source
+      // of truth the feed's current rendering needs to react to.
     }
   });
   ws.addEventListener("close", () => setTimeout(connectLive, 2000));
