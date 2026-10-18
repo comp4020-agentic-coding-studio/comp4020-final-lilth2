@@ -112,6 +112,21 @@ const INSECT_SLOWDOWN: InsectSlowdownConfig = {
   maxReduction: Number(process.env.INSECT_SLOWDOWN_MAX ?? 0.5),
 };
 const CODENAME_FORMAT: CodenameFormat = { codeLength: 3 };
+// Fly's own log retention is short — a machine that auto-stops rolls its
+// recent log window over with it, which is no use for "the logging outlives
+// the crit." These are the backstop: audit_log is a real table on the same
+// persistent volume everything else lives on, pruned lazily (no background
+// timer, same philosophy as maybeSpawnCollectibles) rather than left to grow
+// forever. Both bounds are a judgement call, not a course-mandated figure —
+// generous enough to outlast a crit by weeks, nowhere near large enough to
+// threaten the 256MB container.
+const AUDIT_LOG_RETENTION_DAYS = Number(process.env.AUDIT_LOG_RETENTION_DAYS ?? 30);
+const AUDIT_LOG_MAX_ROWS = Number(process.env.AUDIT_LOG_MAX_ROWS ?? 50_000);
+const AUDIT_LOG_PRUNE_INTERVAL_MS = 60 * 60 * 1000; // at most once an hour, however much traffic there is
+// Enables GET /api/_test/audit-log, which exists purely so the integration
+// suite can assert against *real* persisted log rows rather than trusting
+// logEvent's code by inspection alone — never set on the real Fly deploy.
+const ENABLE_TEST_ENDPOINTS = process.env.ENABLE_TEST_ENDPOINTS === "1";
 
 // Moisture (short-term watering condition) stays mechanically identical to
 // the original single-plant app's decay curve by default, but is now a
@@ -202,8 +217,29 @@ db.exec(`
     id TEXT PRIMARY KEY CHECK (id = 'garden'),
     version INTEGER NOT NULL DEFAULT 0
   );
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    level TEXT NOT NULL,
+    event TEXT NOT NULL,
+    request_id TEXT,
+    actor_public_id TEXT,
+    action TEXT,
+    target_type TEXT,
+    target_id TEXT,
+    outcome TEXT NOT NULL,
+    reason_code TEXT,
+    shared_state_version INTEGER,
+    duration_ms INTEGER,
+    detail TEXT
+  );
+  CREATE TABLE IF NOT EXISTS audit_log_prune_state (
+    id TEXT PRIMARY KEY CHECK (id = 'prune'),
+    last_pruned_at TEXT NOT NULL
+  );
 `);
 db.prepare("INSERT OR IGNORE INTO garden_meta (id, version) VALUES ('garden', 0)").run();
+db.exec("CREATE INDEX IF NOT EXISTS audit_log_ts_idx ON audit_log (ts)");
 // Migrations for columns added after the plant's first deploy: ALTER TABLE
 // has no "IF NOT EXISTS" in sqlite, so this just swallows the one error that
 // means "already applied" and re-throws anything else.
@@ -273,6 +309,15 @@ if (!db.prepare("SELECT 1 FROM migrations WHERE id = 'growth-thresholds-v2'").ge
   db.prepare("INSERT INTO migrations (id, applied_at) VALUES ('growth-thresholds-v2', ?)").run(
     new Date().toISOString(),
   );
+  logEvent({
+    level: "info",
+    event: "migration.run",
+    requestId: randomUUID(),
+    action: "migrate",
+    targetType: "schema",
+    targetId: "growth-thresholds-v2",
+    outcome: "success",
+  });
 }
 if (!db.prepare("SELECT 1 FROM migrations WHERE id = 'growth-thresholds-v3'").get()) {
   for (const id of SPECIES_IDS) {
@@ -283,6 +328,15 @@ if (!db.prepare("SELECT 1 FROM migrations WHERE id = 'growth-thresholds-v3'").ge
   db.prepare("INSERT INTO migrations (id, applied_at) VALUES ('growth-thresholds-v3', ?)").run(
     new Date().toISOString(),
   );
+  logEvent({
+    level: "info",
+    event: "migration.run",
+    requestId: randomUUID(),
+    action: "migrate",
+    targetType: "schema",
+    targetId: "growth-thresholds-v3",
+    outcome: "success",
+  });
 }
 
 export interface GardenPlant {
@@ -471,11 +525,12 @@ interface WaterResult {
   growthAdded?: number;
 }
 
-function waterGardenPlant(visitorId: string, plantId: SpeciesId): WaterResult {
+function waterGardenPlant(visitorId: string, plantId: SpeciesId, requestId: string): WaterResult {
   const now = new Date();
   const today = dateKeyUTC(now);
   const current = getGardenPlant(plantId);
   const visitorGarden = getVisitorGardenDay(visitorId, today);
+  const actorPublicId = identityOf(visitorId);
 
   const decision = decideWatering(WATERING_LIMITS, {
     now,
@@ -484,6 +539,17 @@ function waterGardenPlant(visitorId: string, plantId: SpeciesId): WaterResult {
   });
 
   if (!decision.allowed) {
+    logEvent({
+      level: "info",
+      event: "garden.water",
+      requestId,
+      actorPublicId,
+      action: "water",
+      targetType: "plant",
+      targetId: plantId,
+      outcome: "rejected",
+      reasonCode: decision.reason,
+    });
     return {
       ok: false,
       reason: decision.reason,
@@ -526,6 +592,20 @@ function waterGardenPlant(visitorId: string, plantId: SpeciesId): WaterResult {
 
   checkAchievements();
   bumpGardenVersion();
+  // Logged only now, after every write above has actually committed — a
+  // "success" log line must never be written for a change that then failed
+  // to persist.
+  logEvent({
+    level: "info",
+    event: "garden.water",
+    requestId,
+    actorPublicId,
+    action: "water",
+    targetType: "plant",
+    targetId: plantId,
+    outcome: "success",
+    detail: { growthAdded, remainingToday: limitsFor(visitorId).remainingToday },
+  });
 
   return {
     ok: true,
@@ -687,11 +767,17 @@ interface ClaimFilter {
 // ways: the garden-wide "Inspect foliage" button (no filter), and the
 // detail panel's "Catch an insect here" action (filtered to this plant's
 // bugs) — both keyboard-operable alternatives to a precise click.
-function claimCollectible(visitorId: string, requestedId: string | null, filter: ClaimFilter = {}): ClaimResult {
+function claimCollectible(
+  visitorId: string,
+  requestedId: string | null,
+  filter: ClaimFilter = {},
+  requestId: string = randomUUID(),
+): ClaimResult {
   const now = new Date();
   const nowIso = now.toISOString();
   const today = dateKeyUTC(now);
   const visitorDay = getVisitorGardenDay(visitorId, today);
+  const actorPublicId = identityOf(visitorId);
 
   const decision = decideCollection(COLLECTION_LIMITS, {
     now,
@@ -699,6 +785,17 @@ function claimCollectible(visitorId: string, requestedId: string | null, filter:
     visitorLastCollectAt: visitorDay.lastCollectAt,
   });
   if (!decision.allowed) {
+    logEvent({
+      level: "info",
+      event: "garden.collect",
+      requestId,
+      actorPublicId,
+      action: "collect",
+      targetType: "collectible",
+      targetId: requestedId ?? undefined,
+      outcome: "rejected",
+      reasonCode: decision.reason,
+    });
     return {
       ok: false,
       reason: decision.reason,
@@ -734,9 +831,21 @@ function claimCollectible(visitorId: string, requestedId: string | null, filter:
   }
 
   if (!target) {
+    const reason = requestedId ? "already-claimed" : "nothing-to-find";
+    logEvent({
+      level: "info",
+      event: "garden.collect",
+      requestId,
+      actorPublicId,
+      action: "collect",
+      targetType: "collectible",
+      targetId: requestedId ?? undefined,
+      outcome: "rejected",
+      reasonCode: reason,
+    });
     return {
       ok: false,
-      reason: requestedId ? "already-claimed" : "nothing-to-find",
+      reason,
       collectedToday: visitorDay.collectedToday,
       limit: COLLECTION_LIMITS.dailyLimit,
     };
@@ -752,6 +861,20 @@ function claimCollectible(visitorId: string, requestedId: string | null, filter:
     .prepare("UPDATE garden_collectibles SET caught_at = ?, caught_by = ? WHERE id = ? AND caught_at IS NULL")
     .run(nowIso, visitorId, target.id);
   if (claim.changes === 0) {
+    // The exclusive-claim case: two requests both saw this item as
+    // available, only one UPDATE actually matched — this is the loser,
+    // logged as a named, distinct rejection from "nothing was ever there."
+    logEvent({
+      level: "info",
+      event: "garden.collect",
+      requestId,
+      actorPublicId,
+      action: "collect",
+      targetType: "collectible",
+      targetId: target.id,
+      outcome: "rejected",
+      reasonCode: "already-claimed",
+    });
     return { ok: false, reason: "already-claimed", collectedToday: visitorDay.collectedToday, limit: COLLECTION_LIMITS.dailyLimit };
   }
 
@@ -780,6 +903,19 @@ function claimCollectible(visitorId: string, requestedId: string | null, filter:
   const def = COLLECTIBLES.find((c) => c.id === target.itemId);
   if (!def) throw new Error(`claimed collectible names an unknown catalog item: ${target.itemId}`);
   bumpGardenVersion();
+  // Logged only now, after the atomic claim and every follow-up write above
+  // have actually committed.
+  logEvent({
+    level: "info",
+    event: "garden.collect",
+    requestId,
+    actorPublicId,
+    action: "collect",
+    targetType: "collectible",
+    targetId: target.id,
+    outcome: "success",
+    detail: { itemId: target.itemId, plantId: target.plantId, collectedToday: after.collectedToday },
+  });
 
   return {
     ok: true,
@@ -802,7 +938,17 @@ function claimCollectible(visitorId: string, requestedId: string | null, filter:
 // own log retention has rolled over) in a later commit; every call site
 // added from here on already uses this shape so nothing needs revisiting
 // once that lands.
-function logEvent(entry: {
+// Strips control characters (including newlines, which is what log
+// injection via a client-supplied value would exploit — a fake log line
+// smuggled in through, say, a requested collectible id) and truncates, so
+// anything that ends up in a log line stays one line and bounded in size,
+// whatever a client sent it as.
+function sanitizeForLog(value: string, maxLen = 64): string {
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\x00-\x1f\x7f]/g, "").slice(0, maxLen);
+}
+
+interface LogEntry {
   level: "info" | "warn" | "error";
   event: string;
   requestId: string;
@@ -814,8 +960,62 @@ function logEvent(entry: {
   reasonCode?: string;
   durationMs?: number;
   detail?: Record<string, unknown>;
-}): void {
-  console.log(JSON.stringify({ ts: new Date().toISOString(), ...entry }));
+}
+
+// The one call site every event in this file goes through — both the
+// stdout line `flyctl logs` tails live, and the persisted audit_log row
+// that's still queryable after that live window has rolled over. One
+// function means the two can never drift apart; nothing else in this file
+// writes to audit_log directly. Never called for a plain read (GET
+// /api/state is polled every 20s by every open tab — logging it would
+// drown out everything else in volume for zero narrative value), only for
+// state-changing actions, their rejections, identity creation, WS
+// open/close, migrations, boot, and errors — exactly section V's "must log"
+// list.
+function logEvent(entry: LogEntry): void {
+  const nowIso = new Date().toISOString();
+  const targetId = entry.targetId !== undefined ? sanitizeForLog(entry.targetId) : undefined;
+  const reasonCode = entry.reasonCode !== undefined ? sanitizeForLog(entry.reasonCode) : undefined;
+  console.log(JSON.stringify({ ts: nowIso, ...entry, targetId, reasonCode }));
+  db.prepare(
+    `INSERT INTO audit_log
+       (ts, level, event, request_id, actor_public_id, action, target_type, target_id, outcome, reason_code, shared_state_version, duration_ms, detail)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    nowIso,
+    entry.level,
+    entry.event,
+    entry.requestId,
+    entry.actorPublicId ?? null,
+    entry.action ?? null,
+    entry.targetType ?? null,
+    targetId ?? null,
+    entry.outcome,
+    reasonCode ?? null,
+    currentGardenVersion(),
+    entry.durationMs ?? null,
+    entry.detail ? JSON.stringify(entry.detail) : null,
+  );
+}
+
+// Lazily checked (no background timer, same philosophy as
+// maybeSpawnCollectibles), at most once an hour regardless of request
+// volume — both a time-based cutoff and a row-count backstop, so the table
+// can't grow unbounded even under much heavier traffic than this app
+// actually expects.
+function maybePruneAuditLog(now: Date): void {
+  const row = db.prepare("SELECT last_pruned_at AS lastPrunedAt FROM audit_log_prune_state WHERE id = 'prune'").get() as
+    | { lastPrunedAt: string }
+    | undefined;
+  if (row && now.getTime() - new Date(row.lastPrunedAt).getTime() < AUDIT_LOG_PRUNE_INTERVAL_MS) return;
+
+  const cutoff = new Date(now.getTime() - AUDIT_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  db.prepare("DELETE FROM audit_log WHERE ts < ?").run(cutoff);
+  db.prepare("DELETE FROM audit_log WHERE id <= (SELECT MAX(id) FROM audit_log) - ?").run(AUDIT_LOG_MAX_ROWS);
+  db.prepare(
+    `INSERT INTO audit_log_prune_state (id, last_pruned_at) VALUES ('prune', ?)
+     ON CONFLICT(id) DO UPDATE SET last_pruned_at = excluded.last_pruned_at`,
+  ).run(now.toISOString());
 }
 
 function parseCookies(header: string | undefined): Record<string, string> {
@@ -1007,6 +1207,7 @@ const server = createServer((req, res) => {
   if (url.pathname === "/api/state" && req.method === "GET") {
     const now = new Date();
     maybeSpawnCollectibles(now); // only ever runs as a side effect of a real visit — see its own comment
+    maybePruneAuditLog(now);
     const garden = getGarden();
     res.writeHead(200, { "Content-Type": "application/json" }).end(
       JSON.stringify({
@@ -1035,7 +1236,7 @@ const server = createServer((req, res) => {
     maybeSpawnCollectibles(new Date());
     readJsonBody(req).then((body) => {
       const plantId = isSpeciesId(body.plantId) ? body.plantId : "tree";
-      const result = waterGardenPlant(visitorId, plantId);
+      const result = waterGardenPlant(visitorId, plantId, randomUUID());
       if (result.ok) broadcastGarden();
       res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(result));
     });
@@ -1048,7 +1249,7 @@ const server = createServer((req, res) => {
       const filter: ClaimFilter = {};
       if (isSpeciesId(body.plantId)) filter.plantId = body.plantId;
       if (body.kind === "bug" || body.kind === "treasure") filter.kind = body.kind;
-      const result = claimCollectible(visitorId, requestedId, filter);
+      const result = claimCollectible(visitorId, requestedId, filter, randomUUID());
       if (result.ok) broadcastGarden(); // every client's scene drops this collectible, in sync
       res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(result));
     });
@@ -1061,6 +1262,23 @@ const server = createServer((req, res) => {
   if (url.pathname === "/api/collection/seen" && req.method === "POST") {
     markCollectionSeen(visitorId);
     res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(getCollection(visitorId)));
+    return;
+  }
+  // Gated by an env var never set on the real Fly deploy — exists purely so
+  // the integration suite can assert against real, persisted audit_log rows
+  // rather than trusting logEvent's own code by inspection alone. Returns
+  // every visitor's events (not scoped to the caller), which is exactly why
+  // it must never be reachable outside a test run.
+  if (url.pathname === "/api/_test/audit-log" && req.method === "GET" && ENABLE_TEST_ENDPOINTS) {
+    const rows = db
+      .prepare(
+        `SELECT ts, level, event, request_id AS requestId, actor_public_id AS actorPublicId, action, target_type AS targetType,
+                target_id AS targetId, outcome, reason_code AS reasonCode, shared_state_version AS sharedStateVersion,
+                duration_ms AS durationMs, detail
+         FROM audit_log ORDER BY id DESC LIMIT 200`,
+      )
+      .all();
+    res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ rows }));
     return;
   }
   if (STATIC_FILES.has(url.pathname)) {
@@ -1076,12 +1294,54 @@ server.on("upgrade", (req, socket, head) => {
     return;
   }
   wss.handleUpgrade(req, socket, head, (ws) => {
-    maybeSpawnCollectibles(new Date()); // a reconnect counts as activity too
+    const now = new Date();
+    maybeSpawnCollectibles(now); // a reconnect counts as activity too
+    maybePruneAuditLog(now);
+    // Best-effort only — never mints a new identity here, just tags the
+    // connection log line if this visitor already has one. A visitor who's
+    // never made an HTTP request yet (and so has no cookie) connects fine,
+    // just logged without an actorPublicId.
+    const cookieVisitorId = parseCookies(req.headers.cookie).visitor_id;
+    const wsActorPublicId = cookieVisitorId
+      ? ((db.prepare("SELECT public_id AS publicId FROM visitor_identity WHERE visitor_id = ?").get(cookieVisitorId) as
+          | { publicId: string }
+          | undefined)?.publicId ?? null)
+      : null;
+    const connectRequestId = randomUUID();
+    logEvent({
+      level: "info",
+      event: "ws.open",
+      requestId: connectRequestId,
+      actorPublicId: wsActorPublicId,
+      action: "connect",
+      targetType: "connection",
+      outcome: "success",
+    });
     ws.send(JSON.stringify(gardenSnapshot()));
+    ws.on("close", () => {
+      logEvent({
+        level: "info",
+        event: "ws.close",
+        requestId: connectRequestId,
+        actorPublicId: wsActorPublicId,
+        action: "disconnect",
+        targetType: "connection",
+        outcome: "success",
+      });
+    });
     wss.emit("connection", ws, req);
   });
 });
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`tend listening on :${PORT}, data at ${DB_PATH}`);
+  logEvent({
+    level: "info",
+    event: "server.boot",
+    requestId: randomUUID(),
+    action: "boot",
+    targetType: "server",
+    outcome: "success",
+    detail: { port: PORT },
+  });
 });
