@@ -1092,6 +1092,31 @@ function visitorIdOf(req: IncomingMessage): { id: string; isNew: boolean } {
   return { id: randomUUID(), isNew: true };
 }
 
+// CSRF: SameSite=Lax on the session cookie (above) is already the first,
+// strongest layer — no modern evergreen browser attaches it to a cross-site
+// fetch() POST, which is the entire vector a JSON API like this one is
+// exposed to. This is the deliberately narrow second layer: reject only
+// when an Origin (or, lacking that, Referer) header is PRESENT and names a
+// different host than the request's own — never when it's simply absent.
+// A real browser's same-origin fetch() always sends Origin, so "absent" is
+// never what a forged cross-site request from a browser looks like; it's
+// what every one of this repo's own vitest specs sends today (Node's
+// global fetch() doesn't set Origin for a same-process call), so rejecting
+// on "absent" would fail the entire existing test suite for no real
+// security gain — the mismatched case is the only unambiguous forgery
+// signal available here.
+function isTrustedOrigin(req: IncomingMessage): boolean {
+  const origin = req.headers.origin ?? req.headers.referer;
+  if (!origin) return true;
+  let originHost: string;
+  try {
+    originHost = new URL(origin).host;
+  } catch {
+    return false; // an Origin/Referer header present but unparseable is itself suspicious
+  }
+  return originHost === req.headers.host;
+}
+
 function withVisitorCookie(res: ServerResponse, req: IncomingMessage, id: string, isNew: boolean): void {
   if (!isNew) return;
   // Fly terminates TLS in front of this app (fly.toml's own note: "the app
@@ -1304,6 +1329,25 @@ const server = createServer((req, res) => {
         },
       }),
     );
+    return;
+  }
+  // Applied to every state-changing route below, right where each one
+  // already sits — never to the GET routes above, which don't need it.
+  if (
+    (url.pathname === "/api/water" || url.pathname === "/api/collect" || url.pathname === "/api/collection/seen") &&
+    req.method === "POST" &&
+    !isTrustedOrigin(req)
+  ) {
+    logEvent({
+      level: "warn",
+      event: "security.origin-rejected",
+      requestId: randomUUID(),
+      action: url.pathname.replace("/api/", ""),
+      targetType: "request",
+      outcome: "rejected",
+      reasonCode: "origin-mismatch",
+    });
+    res.writeHead(403, { "Content-Type": "application/json" }).end(JSON.stringify({ ok: false, reason: "origin-mismatch" }));
     return;
   }
   if (url.pathname === "/api/water" && req.method === "POST") {
