@@ -9,6 +9,7 @@ import { marked } from "marked";
 import { WebSocketServer } from "ws";
 import {
   ACHIEVEMENTS,
+  CODENAME_NOUNS,
   COLLECTIBLES,
   DEFAULT_SPAWN_WEIGHTS,
   dailyEventFor,
@@ -20,11 +21,13 @@ import {
   migrateGrowthUnits,
   moistureStageFor,
   nextSpawnDelaySeconds,
+  pickCodename,
   pickSpawnKind,
   pickWeightedCollectible,
   spawnBatchSize,
   utcMidnightAfter,
   type AchievementGardenView,
+  type CodenameFormat,
   type GardenEvent,
   type InsectSlowdownConfig,
   type MoistureConfig,
@@ -108,6 +111,7 @@ const INSECT_SLOWDOWN: InsectSlowdownConfig = {
   perBug: Number(process.env.INSECT_SLOWDOWN_PER_BUG ?? 0.05),
   maxReduction: Number(process.env.INSECT_SLOWDOWN_MAX ?? 0.5),
 };
+const CODENAME_FORMAT: CodenameFormat = { codeLength: 3 };
 
 // Moisture (short-term watering condition) stays mechanically identical to
 // the original single-plant app's decay curve by default, but is now a
@@ -188,6 +192,11 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS garden_spawn_state (
     id TEXT PRIMARY KEY,
     next_spawn_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS visitor_identity (
+    visitor_id TEXT PRIMARY KEY,
+    public_id TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
   );
 `);
 // Migrations for columns added after the plant's first deploy: ALTER TABLE
@@ -762,6 +771,27 @@ function claimCollectible(visitorId: string, requestedId: string | null, filter:
   };
 }
 
+// Minimal for now — stdout only. Extended to also persist a queryable
+// SQLite row (so "the logging outlives the crit" is true even after Fly's
+// own log retention has rolled over) in a later commit; every call site
+// added from here on already uses this shape so nothing needs revisiting
+// once that lands.
+function logEvent(entry: {
+  level: "info" | "warn" | "error";
+  event: string;
+  requestId: string;
+  actorPublicId?: string | null;
+  action?: string;
+  targetType?: string;
+  targetId?: string;
+  outcome: "success" | "rejected" | "error";
+  reasonCode?: string;
+  durationMs?: number;
+  detail?: Record<string, unknown>;
+}): void {
+  console.log(JSON.stringify({ ts: new Date().toISOString(), ...entry }));
+}
+
 function parseCookies(header: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   if (!header) return out;
@@ -779,11 +809,78 @@ function visitorIdOf(req: IncomingMessage): { id: string; isNew: boolean } {
   return { id: randomUUID(), isNew: true };
 }
 
-function withVisitorCookie(res: ServerResponse, id: string, isNew: boolean): void {
+function withVisitorCookie(res: ServerResponse, req: IncomingMessage, id: string, isNew: boolean): void {
   if (!isNew) return;
+  // Fly terminates TLS in front of this app (fly.toml's own note: "the app
+  // itself sees plain http"), so req.socket.encrypted is always false in
+  // production — a naive check would never set Secure at all. Fly's proxy
+  // sets X-Forwarded-Proto on every real external request instead; locally,
+  // where that header is absent, Secure is correctly left off so a plain
+  // http://localhost dev cookie still works.
+  const isHttps = req.headers["x-forwarded-proto"] === "https";
   // A year is long enough to prove "your trace is still here" without the
   // app needing to think about expiry.
-  res.setHeader("Set-Cookie", `visitor_id=${id}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax`);
+  res.setHeader(
+    "Set-Cookie",
+    `visitor_id=${id}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax${isHttps ? "; Secure" : ""}`,
+  );
+}
+
+// The session credential (visitor_id, above) and the public-facing label
+// are deliberately separate: visitor_id is an unguessable UUID that must
+// never be shown to anyone, including the visitor it belongs to; public_id
+// ("Maple-7K2") is safe to put in the UI and in logs precisely because it
+// carries no session-hijacking value on its own. Created lazily on whichever
+// request first needs it — a genuinely new visitor, or an existing one who
+// predates this feature — rather than a bulk backfill: every visitor_id
+// this table will ever need to know about shows up on its own next request,
+// at the cost of one indexed lookup, with nothing to run once up front.
+function identityOf(visitorId: string): string {
+  const existing = db.prepare("SELECT public_id AS publicId FROM visitor_identity WHERE visitor_id = ?").get(visitorId) as
+    | { publicId: string }
+    | undefined;
+  if (existing) return existing.publicId;
+
+  const nowIso = new Date().toISOString();
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const candidate = pickCodename(CODENAME_NOUNS, CODENAME_FORMAT, Math.random(), Math.random());
+    try {
+      db.prepare("INSERT INTO visitor_identity (visitor_id, public_id, created_at) VALUES (?, ?, ?)").run(
+        visitorId,
+        candidate,
+        nowIso,
+      );
+      logEvent({
+        level: "info",
+        event: "identity.new",
+        requestId: randomUUID(),
+        actorPublicId: candidate,
+        action: "create-identity",
+        targetType: "identity",
+        outcome: "success",
+      });
+      return candidate;
+    } catch (err) {
+      if (!(err instanceof Error && err.message.includes("UNIQUE constraint failed"))) throw err;
+      // Collided with an existing public_id — try again with two fresh draws.
+    }
+  }
+  // Astronomically unlikely (~550k combinations, 20 attempts) but a visitor
+  // still needs *a* codename to proceed — this fallback is unique by
+  // construction, since visitorId itself already is.
+  const fallbackNoun = CODENAME_NOUNS[0];
+  const fallback = `${fallbackNoun}-${visitorId.slice(0, 6).toUpperCase()}`;
+  db.prepare(
+    "INSERT INTO visitor_identity (visitor_id, public_id, created_at) VALUES (?, ?, ?) ON CONFLICT(visitor_id) DO NOTHING",
+  ).run(visitorId, fallback, nowIso);
+  logEvent({
+    level: "warn",
+    event: "identity.codename-fallback",
+    requestId: randomUUID(),
+    outcome: "success",
+    detail: { publicId: fallback },
+  });
+  return fallback;
 }
 
 function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -869,7 +966,7 @@ function broadcastGarden(): void {
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
   const { id: visitorId, isNew } = visitorIdOf(req);
-  withVisitorCookie(res, visitorId, isNew);
+  withVisitorCookie(res, req, visitorId, isNew);
 
   if (url.pathname === "/" && req.method === "GET") {
     serveStatic(res, "public/index.html");
@@ -888,6 +985,7 @@ const server = createServer((req, res) => {
         plant: garden.tree,
         garden,
         visitor: getVisitor(visitorId),
+        identity: { publicId: identityOf(visitorId) },
         limits: limitsFor(visitorId),
         event: dailyEventFor(now),
         achievements: getAchievements(),
